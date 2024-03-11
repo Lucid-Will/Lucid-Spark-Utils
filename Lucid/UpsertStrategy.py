@@ -9,11 +9,10 @@
 # In[ ]:
 
 
-import logging
 import datetime
 from decimal import Decimal
-from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import current_timestamp, lit
+from pyspark.sql import Row
+from pyspark.sql.functions import lit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from delta.tables import DeltaTable
 import os
@@ -51,6 +50,10 @@ class UpsertToFactTable(UpsertStrategy):
             table_name = config['table_name']
             df_source = config['dataframe']
             match_keys = config['match_keys']
+            
+            # Enhance df_source with audit columns
+            current_ts = lit(datetime.datetime.now())
+            df_source = df_source.withColumn("inserted_date_time", current_ts).withColumn("updated_date_time", current_ts)
 
             # Define match condition for the MERGE operation based on the unique identifiers or keys
             match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
@@ -67,11 +70,8 @@ class UpsertToFactTable(UpsertStrategy):
                     if not storage_container_endpoint:
                         raise ValueError("storage_container_endpoint is required for 'abfss' write method")
                     df_source.write.format("delta").save(f"{storage_container_endpoint}/Tables/{table_name}")
-                deltaTable = DeltaTable.forName(self.spark, table_name)
-
-            # Enhance df_source with audit columns
-            current_ts = current_timestamp()
-            df_source = df_source.withColumn("inserted_date_time", current_ts).withColumn("updated_date_time", current_ts)
+                print(f"Fact upsert for {table_name} complete.")
+                return
 
             # Define update expression for upsert operation
             update_expr = {col: f"source.{col}" for col in df_source.columns if col not in match_keys}
@@ -84,6 +84,7 @@ class UpsertToFactTable(UpsertStrategy):
 
             # Execute the merge operation
             merge_operation.execute()
+            print(f"Fact upsert for {table_name} complete.")
         except Exception as e:
             self.logger.error(f"An error occurred in upsert_to_delta_table for table {table_name}: {e}")
             raise
@@ -93,72 +94,100 @@ class UpsertToFactTable(UpsertStrategy):
 
 
 class UpsertSCD1Strategy(UpsertStrategy):
-    def insert_unknown_record(self, df_source, table_name):
+    def insert_unknown_record(self, df_source):
         """
         Inserts an unknown record into the source dataframe.
         """
-        unknown_record = {col: None for col in df_source.columns}
-        unknown_record.update({
-            "inserted_date_time": datetime.datetime.now(),
-            "updated_date_time": datetime.datetime.now(),
-        })
+        # Create a dictionary with default values for each field in df_source
+        unknown_record = {}
+        for field in df_source.schema.fields:
+            if field.dataType.typeName() == 'string':
+                unknown_record[field.name] = 'Unknown'
+            elif field.dataType.typeName() in ['integer', 'double', 'long', 'short', 'byte', 'float']:
+                unknown_record[field.name] = -1
+            elif field.dataType.typeName() == 'date':
+                unknown_record[field.name] = datetime.date(1901, 1, 1)
+            elif field.dataType.typeName() == 'timestamp':
+                unknown_record[field.name] = datetime.datetime(1901, 1, 1)
+            elif field.dataType.typeName() == 'boolean':
+                unknown_record[field.name] = False
+            elif field.dataType.typeName() == 'decimal':
+                unknown_record[field.name] = Decimal(-1.0)
+            else:
+                raise ValueError(f"Unsupported field type: {field.dataType.typeName()}")
 
-        # Capture key field
-        key_field = df_source.columns[0]
-        
-        # Set the key field based on the table name
-        if 'date' in table_name.lower():
-            unknown_record[key_field] = 19010101
-        else:
-            unknown_record[key_field] = -1
+        # Create a row with the same schema as df_source
+        row = Row(**unknown_record)
+        df_source = self.spark.createDataFrame([row], df_source.schema)
 
-        return df_source.union(spark.createDataFrame([unknown_record]))
+        return df_source
     
     def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+        """
+        Performs an upsert operation (merge) on a Delta table based on the provided configuration.
+        This function supports SCD1, deletes, and auditing with specified columns.
+        
+        Args:
+            config (dict): Configuration for upserting a Delta table including 'table_name', 'dataframe',
+                        'match_keys', and 'delete_unmatched'. Expects audit columns in the dataframe.
+            write_method (str): The method to use for saving the table ('default' or 'abfss').
+            storage_container_endpoint (str): Endpoint if using 'abfss' write method.
+            
+        Raises:
+            Exception: If any error occurs during the upsert operation.
+        """
         table_name = config['table_name']
         df_source = config['dataframe']
         match_keys = config['match_keys']
+        current_ts = lit(datetime.datetime.now())
 
         try:
-            # Enhance df_source with necessary audit fields
-            current_ts = lit(datetime.datetime.now())
-            df_source = (df_source
-                        .withColumn("inserted_date_time", current_ts)
-                        .withColumn("updated_date_time", current_ts))
-
-            # Insert unknown record, unless it's a date dimension
-            if 'date' not in table_name.lower():
-                df_source = self.insert_unknown_record(df_source, table_name)
-
             # Attempt to access or create the Delta table
             try:
                 deltaTable = DeltaTable.forName(self.spark, table_name)
             except Exception:
                 self.logger.info(f"Table {table_name} does not exist. Creating it.")
+
+                # Insert unknown record, unless it's a date dimension
+                if 'date' not in table_name.lower():
+                    df_unknown = self.insert_unknown_record(df_source)
+
+                    # Union df_unknown and df_source
+                    df_source = df_source.union(df_unknown) \
+                            .withColumn("inserted_date_time", current_ts) \
+                            .withColumn("updated_date_time", current_ts)
+
                 if write_method == 'default':
                     df_source.write.format("delta").saveAsTable(table_name)
                 elif write_method == 'abfss':
                     if not storage_container_endpoint:
                         raise ValueError("storage_container_endpoint must be provided with 'abfss' write method")
                     df_source.write.format("delta").save(f"{storage_container_endpoint}/Tables/{table_name}")
+                print(f"Dimension upsert for {table_name} complete.")
                 return            
 
+            # Enhance df_source with necessary audit fields
+            df_source = (df_source
+                        .withColumn("inserted_date_time", current_ts)
+                        .withColumn("updated_date_time", current_ts))
+            
             # Define match condition for the MERGE operation
             match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
 
-            # Configure the merge operation to update existing records
+            # Get non-match key fields excluding audit fields
+            non_match_keys = [col for col in df_source.columns if col not in match_keys + [
+                "inserted_date_time",
+                "updated_date_time"
+            ]]
+            
+            # Create a condition to check if any non-match key field has changed
+            update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
+
+            # Configure the merge operation to update existing records and insert new records
             merge_operation = deltaTable.alias("target") \
                             .merge(df_source.alias("source"), match_condition) \
-                            .whenMatchedUpdateAll()
-
-            # Execute the merge operation
-            merge_operation.execute()
-
-            # Configure the merge operation to insert new records
-            merge_operation = deltaTable.alias("target") \
-                            .merge(df_source.alias("source"), match_condition) \
+                            .whenMatchedUpdateAll(condition=update_condition) \
                             .whenNotMatchedInsertAll()
-
             # Execute the merge operation
             merge_operation.execute()
 
@@ -247,6 +276,7 @@ class UpsertSCD2Strategy(UpsertStrategy):
                     if not storage_container_endpoint:
                         raise ValueError("storage_container_endpoint must be provided with 'abfss' write method")
                     df_source.write.format("delta").save(f"{storage_container_endpoint}/Tables/{table_name}")
+                print(f"Dimension upsert for {table_name} complete.")
                 return            
 
             # Enhance df_source with necessary audit and SCD2 fields
@@ -272,7 +302,7 @@ class UpsertSCD2Strategy(UpsertStrategy):
             update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
 
             # Define match condition for the MERGE operation
-            match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
+            match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys]) + " AND target.is_current = true"
 
             # Prepare expressions for existing records and configure the merge operation
             expire_expr = {
@@ -380,7 +410,6 @@ class UpsertGeneric(UpsertStrategy):
             self.logger.error(f"An error occurred while upserting into the Delta table {table_name}: {e}")
             raise
 
-
 # In[ ]:
 
 
@@ -406,4 +435,3 @@ class ConcurrentUpsertHandler:
             futures = [executor.submit(upsert_table, config) for config in table_configs]
             for future in as_completed(futures):
                 future.result()
-
