@@ -9,10 +9,11 @@
 # In[ ]:
 
 
+import logging
 import datetime
 from decimal import Decimal
-from pyspark.sql import Row
-from pyspark.sql.functions import lit
+from pyspark.sql import SparkSession, Row
+from pyspark.sql.functions import current_timestamp, lit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from delta.tables import DeltaTable
 import os
@@ -23,9 +24,11 @@ import os
 
 class UpsertStrategy:
 
-    def __init__(self, spark, logger):
+    def __init__(self, spark, logger, transform_manager = None):
         self.spark = spark
         self.logger = logger
+
+        self.transformer = transform_manager
 
     def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
         raise NotImplementedError("Subclass must implement abstract method")
@@ -45,11 +48,17 @@ class UpsertToFactTable(UpsertStrategy):
                         and 'match_keys'. Assumes audit columns are relevant but less complex.
             write_method (str): The method to use for saving the table ('default' or 'abfss').
             storage_container_endpoint (str): Endpoint if using 'abfss' write method.
+            key_column (str): The name of the surrogate key column. If provided, surrogate keys will be generated.
         """
         try:
             table_name = config['table_name']
             df_source = config['dataframe']
             match_keys = config['match_keys']
+            key_column = config.get('skey_column')
+            
+            # If a transformer and a key_column are provided, generate surrogate keys
+            if self.transformer and key_column:
+                df_source = self.transformer.generate_surrogate_keys(df_source, key_column)
             
             # Enhance df_source with audit columns
             current_ts = lit(datetime.datetime.now())
@@ -139,7 +148,16 @@ class UpsertSCD1Strategy(UpsertStrategy):
         table_name = config['table_name']
         df_source = config['dataframe']
         match_keys = config['match_keys']
+        key_column = config.get('skey_column')
         current_ts = lit(datetime.datetime.now())
+
+        # If a transformer and a key_column are provided, generate surrogate keys
+        if self.transformer and key_column:
+            # Get the list of columns from the dataframe
+            columns = df_source.columns
+
+            # Use key_column as the new_column and match_keys as match_key_columns
+            df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, columns, key_column, match_keys)
 
         try:
             # Attempt to access or create the Delta table
@@ -153,9 +171,12 @@ class UpsertSCD1Strategy(UpsertStrategy):
                     df_unknown = self.insert_unknown_record(df_source)
 
                     # Union df_unknown and df_source
-                    df_source = df_source.union(df_unknown) \
-                            .withColumn("inserted_date_time", current_ts) \
-                            .withColumn("updated_date_time", current_ts)
+                    df_source = df_source.union(df_unknown)
+                
+                # Add audit columns
+                df_source = df_source \
+                        .withColumn("inserted_date_time", current_ts) \
+                        .withColumn("updated_date_time", current_ts)
 
                 if write_method == 'default':
                     df_source.write.format("delta").saveAsTable(table_name)
@@ -238,7 +259,7 @@ class UpsertSCD2Strategy(UpsertStrategy):
         
         Args:
             config (dict): Configuration for upserting a Delta table including 'table_name', 'dataframe',
-                        'match_keys', and 'delete_unmatched'. Expects audit columns in the dataframe.
+                        'match_keys', 'delete_unmatched', 'skey_column', and 'nkey_column'. Expects audit columns in the dataframe.
             write_method (str): The method to use for saving the table ('default' or 'abfss').
             storage_container_endpoint (str): Endpoint if using 'abfss' write method.
             
@@ -248,7 +269,19 @@ class UpsertSCD2Strategy(UpsertStrategy):
         table_name = config['table_name']
         df_source = config['dataframe']
         match_keys = config['match_keys']
+        skey_column = config.get('skey_column')
+        nkey_column = config.get('nkey_column')
         current_ts = lit(datetime.datetime.now())
+
+        # If a transformer is provided, generate surrogate and natural keys
+        if self.transformer and nkey_column:
+            # Use key_column as the new_column and match_keys as match_key_columns
+            df_source = self.transformer.stage_dataframe_with_natural_key(df_source, df_source.columns, nkey_column, match_keys)
+            
+        # If a transformer is provided, generate surrogate and natural keys
+        if self.transformer and skey_column:
+            # Use key_column as the new_column and match_keys as match_key_columns
+            df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, df_source.columns, skey_column, match_keys)
 
         try:
             # Attempt to access or create the Delta table
@@ -290,6 +323,8 @@ class UpsertSCD2Strategy(UpsertStrategy):
             
             # Get non-match key fields excluding audit and SCD2 fields
             non_match_keys = [col for col in df_source.columns if col not in match_keys + [
+                skey_column,
+                nkey_column,
                 "inserted_date_time",
                 "updated_date_time",
                 "effective_from_date_time",
@@ -414,24 +449,47 @@ class UpsertGeneric(UpsertStrategy):
 
 
 class ConcurrentUpsertHandler:
+    """
+    This class handles concurrent upsert operations on multiple tables.
+    """
 
-    def __init__(self, spark, logger):
+    def __init__(self, spark, logger, transform_manager=None):
+        """
+        Initializes the handler with a Spark session, a logger, and an optional transform manager.
+        """
         self.spark = spark
         self.logger = logger
+        self.transform_manager = transform_manager
 
     def upsert_data_concurrently(self, table_configs, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+        """
+        Performs upsert operations concurrently on multiple tables based on the provided configurations.
+        """
         def upsert_table(config):
+            """
+            Performs an upsert operation on a single table based on the provided configuration.
+            """
+            # Map of upsert types to strategy classes
             strategy_map = {
-                'fact': UpsertToFactTable(self.spark, self.logger),
-                'scd2': UpsertSCD2Strategy(self.spark, self.logger),
-                'scd1': UpsertSCD1Strategy(self.spark, self.logger),
+                'fact': UpsertToFactTable(self.spark, self.logger, self.transform_manager),
+                'scd2': UpsertSCD2Strategy(self.spark, self.logger, self.transform_manager),
+                'scd1': UpsertSCD1Strategy(self.spark, self.logger, self.transform_manager),
                 'generic': UpsertGeneric(self.spark, self.logger)
             }
+
+            # Get the strategy for the upsert type specified in the config, or use the generic strategy by default
             strategy = strategy_map.get(config.get('upsert_type', 'generic'), UpsertGeneric(self.spark, self.logger))
+
+            # Perform the upsert operation
             strategy.upsert_to_table(config, storage_container_endpoint, write_method, delete_unmatched)
+
+            # Log a message indicating that the upsert operation is complete
             self.logger.info(f"Upsert for {config['table_name']} completed.")
 
+        # Create a ThreadPoolExecutor and submit the upsert_table function for each table config
         with ThreadPoolExecutor(max_workers=min(len(table_configs), (os.cpu_count() or 1) * 5)) as executor:
             futures = [executor.submit(upsert_table, config) for config in table_configs]
+
+            # Wait for all futures to complete
             for future in as_completed(futures):
                 future.result()

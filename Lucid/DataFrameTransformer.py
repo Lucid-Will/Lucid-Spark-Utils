@@ -10,7 +10,7 @@
 
 
 import logging
-from pyspark.sql.functions import col, concat_ws, abs, hash
+from pyspark.sql.functions import col, concat_ws, abs, hash, current_timestamp
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -22,7 +22,7 @@ class DataFrameTransformer:
         self.logger = logging.getLogger(__name__)
         self.spark = spark
 
-    def stage_dataframe_with_surrogate_key(self, dataframe, columns, new_column=None, match_key_columns=None):
+    def stage_dataframe_with_natural_key(self, dataframe, columns, new_column=None, match_key_columns=None):
         """
         This method transforms a dataframe by selecting distinct rows based on the given columns.
         If a new column is specified, it adds the new column with an integer hash based on the match_key_columns.
@@ -37,6 +37,33 @@ class DataFrameTransformer:
 
             # Generate an integer hash based on the match_key_columns and add it as the new column
             concat_cols = concat_ws('_', *[df_transformed[col] for col in match_key_columns])
+            df_transformed = df_transformed.withColumn(new_column, abs(hash(concat_cols))).select(new_column, *columns)
+
+            # Return the transformed dataframe
+            return df_transformed
+        except Exception as e:
+            # Print the error message and return None if an error occurs
+            self.logger.error(f"An error occurred while transforming the dataframe with columns {columns}, match_key_columns {match_key_columns}, and new column {new_column}: {e}")
+            return None
+        
+    def stage_dataframe_with_surrogate_key(self, dataframe, columns, new_column=None, match_key_columns=None):
+        """
+        This method transforms a dataframe by selecting distinct rows based on the given columns.
+        If a new column is specified, it adds the new column with an integer hash based on the match_key_columns.
+        """
+        try:
+            # If a new column is not specified, just return the dataframe with distinct rows
+            if not new_column or not match_key_columns:
+                return dataframe.select(*columns).distinct()
+
+            # Select the specified columns, remove duplicate rows
+            df_transformed = dataframe.select(*columns).distinct()
+
+            # Add a timestamp column
+            df_transformed = df_transformed.withColumn("timestamp", current_timestamp())
+
+            # Generate an integer hash based on the match_key_columns and the timestamp and add it as the new column
+            concat_cols = concat_ws('_', *[df_transformed[col] for col in match_key_columns], df_transformed["timestamp"])
             df_transformed = df_transformed.withColumn(new_column, abs(hash(concat_cols))).select(new_column, *columns)
 
             # Return the transformed dataframe
