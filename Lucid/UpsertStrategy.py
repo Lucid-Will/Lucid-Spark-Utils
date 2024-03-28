@@ -55,44 +55,58 @@ class UpsertToFactTable(UpsertStrategy):
             df_source = config['dataframe']
             match_keys = config['match_keys']
             key_column = config.get('skey_column')
+            current_ts = lit(datetime.datetime.now())
             
             # If a transformer and a key_column are provided, generate surrogate keys
             if self.transformer and key_column:
                 df_source = self.transformer.generate_surrogate_keys(df_source, key_column)
             
-            # Enhance df_source with audit columns
-            current_ts = lit(datetime.datetime.now())
-            df_source = df_source.withColumn("inserted_date_time", current_ts).withColumn("updated_date_time", current_ts)
-
-            # Define match condition for the MERGE operation based on the unique identifiers or keys
-            match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
+            # Enhance df_source with necessary audit fields
+            df_source = (df_source
+                        .withColumn("inserted_date_time", current_ts)
+                        .withColumn("updated_date_time", current_ts))
 
             # Try to access the Delta table, create if it does not exist
             try:
                 deltaTable = DeltaTable.forName(self.spark, table_name)
             except Exception:
                 self.logger.info(f"Fact table {table_name} does not exist. Creating it.")
+                
                 # Choose the write method based on the provided arguments
                 if write_method == 'default':
                     df_source.write.format("delta").saveAsTable(table_name)
+
                 elif write_method == 'abfss':
                     if not storage_container_endpoint:
                         raise ValueError("storage_container_endpoint is required for 'abfss' write method")
                     df_source.write.format("delta").save(f"{storage_container_endpoint}/Tables/{table_name}")
+
                 print(f"Fact upsert for {table_name} complete.")
                 return
 
-            # Define update expression for upsert operation
-            update_expr = {col: f"source.{col}" for col in df_source.columns if col not in match_keys}
+            # Define match condition for the MERGE operation
+            match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
 
-            # Configure the merge operation for fact table upserts
+            # Generate excluded column list
+            excluded_columns = match_keys + ["inserted_date_time", "updated_date_time"]
+            if key_column:  
+                excluded_columns.append(key_column)
+
+            # Get non-match key fields excluding audit fields
+            non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
+
+            # Create a condition to check if any non-match key field has changed
+            update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
+
+            # Configure the merge operation to update existing records and insert new records
             merge_operation = deltaTable.alias("target") \
-                .merge(df_source.alias("source"), match_condition) \
-                .whenMatchedUpdate(set=update_expr) \
-                .whenNotMatchedInsertAll()
+                            .merge(df_source.alias("source"), match_condition) \
+                            .whenMatchedUpdateAll(condition=update_condition) \
+                            .whenNotMatchedInsertAll()
 
             # Execute the merge operation
             merge_operation.execute()
+            
             print(f"Fact upsert for {table_name} complete.")
         except Exception as e:
             self.logger.error(f"An error occurred in upsert_to_delta_table for table {table_name}: {e}")
@@ -180,10 +194,12 @@ class UpsertSCD1Strategy(UpsertStrategy):
 
                 if write_method == 'default':
                     df_source.write.format("delta").saveAsTable(table_name)
+
                 elif write_method == 'abfss':
                     if not storage_container_endpoint:
                         raise ValueError("storage_container_endpoint must be provided with 'abfss' write method")
                     df_source.write.format("delta").save(f"{storage_container_endpoint}/Tables/{table_name}")
+
                 print(f"Dimension upsert for {table_name} complete.")
                 return            
 
@@ -195,11 +211,13 @@ class UpsertSCD1Strategy(UpsertStrategy):
             # Define match condition for the MERGE operation
             match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
 
+            # Generate excluded column list
+            excluded_columns = match_keys + ["inserted_date_time", "updated_date_time"]
+            if key_column:  
+                excluded_columns.append(key_column)
+
             # Get non-match key fields excluding audit fields
-            non_match_keys = [col for col in df_source.columns if col not in match_keys + [
-                "inserted_date_time",
-                "updated_date_time"
-            ]]
+            non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
             
             # Create a condition to check if any non-match key field has changed
             update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
@@ -321,17 +339,21 @@ class UpsertSCD2Strategy(UpsertStrategy):
                         .withColumn("is_current", lit(True))
                         .withColumn("is_deleted", lit(False)))
             
-            # Get non-match key fields excluding audit and SCD2 fields
-            non_match_keys = [col for col in df_source.columns if col not in match_keys + [
-                skey_column,
-                nkey_column,
+            # Generate excluded column list
+            excluded_columns = match_keys + [
                 "inserted_date_time",
                 "updated_date_time",
                 "effective_from_date_time",
                 "effective_to_date_time",
                 "is_current",
-                "is_deleted"
-            ]]
+                "is_deleted"]
+            if skey_column:  
+                excluded_columns.append(skey_column)
+            if nkey_column:  
+                excluded_columns.append(nkey_column)
+
+            # Get non-match key fields excluding audit fields
+            non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
 
             # Create a condition to check if any non-match key field has changed
             update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
@@ -445,6 +467,7 @@ class UpsertGeneric(UpsertStrategy):
             self.logger.error(f"An error occurred while upserting into the Delta table {table_name}: {e}")
             raise
 
+
 # In[ ]:
 
 
@@ -493,3 +516,4 @@ class ConcurrentUpsertHandler:
             # Wait for all futures to complete
             for future in as_completed(futures):
                 future.result()
+
