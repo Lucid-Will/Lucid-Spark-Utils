@@ -10,7 +10,7 @@
 
 
 import logging
-from pyspark.sql.functions import col, concat_ws, abs, hash, current_timestamp
+from pyspark.sql.functions import concat_ws, abs, hash, current_timestamp
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 

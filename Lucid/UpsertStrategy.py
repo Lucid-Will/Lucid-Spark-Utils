@@ -9,11 +9,10 @@
 # In[ ]:
 
 
-import logging
 import datetime
 from decimal import Decimal
-from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import current_timestamp, lit
+from pyspark.sql import Row
+from pyspark.sql.functions import lit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from delta.tables import DeltaTable
 import os
@@ -30,7 +29,7 @@ class UpsertStrategy:
 
         self.transformer = transform_manager
 
-    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default'):
         raise NotImplementedError("Subclass must implement abstract method")
 
 
@@ -39,7 +38,7 @@ class UpsertStrategy:
 
 class UpsertToFactTable(UpsertStrategy):
 
-    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default'):
         """
         Performs an upsert operation on a Delta fact table based on the provided configuration.
         
@@ -50,17 +49,28 @@ class UpsertToFactTable(UpsertStrategy):
             storage_container_endpoint (str): Endpoint if using 'abfss' write method.
             key_column (str): The name of the surrogate key column. If provided, surrogate keys will be generated.
         """
+        table_name = config['table_name']
+        df_source = config['dataframe']
+        match_keys = config['match_keys']
+        skey_column = config.get('skey_column')
+        nkey_column = config.get('nkey_column')
+        current_ts = lit(datetime.datetime.now())
+
         try:
-            table_name = config['table_name']
-            df_source = config['dataframe']
-            match_keys = config['match_keys']
-            key_column = config.get('skey_column')
-            current_ts = lit(datetime.datetime.now())
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and nkey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_natural_key(df_source, df_source.columns, nkey_column, match_keys)
+                
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and skey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, df_source.columns, skey_column, match_keys)
+        except Exception:
+            self.logger.info(f"Creation of key fields for table {table_name} failed.")
+            raise
             
-            # If a transformer and a key_column are provided, generate surrogate keys
-            if self.transformer and key_column:
-                df_source = self.transformer.generate_surrogate_keys(df_source, key_column)
-            
+        try:
             # Enhance df_source with necessary audit fields
             df_source = (df_source
                         .withColumn("inserted_date_time", current_ts)
@@ -89,8 +99,10 @@ class UpsertToFactTable(UpsertStrategy):
 
             # Generate excluded column list
             excluded_columns = match_keys + ["inserted_date_time", "updated_date_time"]
-            if key_column:  
-                excluded_columns.append(key_column)
+            if skey_column:  
+                excluded_columns.append(skey_column)
+            if nkey_column:  
+                excluded_columns.append(nkey_column)
 
             # Get non-match key fields excluding audit fields
             non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
@@ -100,13 +112,14 @@ class UpsertToFactTable(UpsertStrategy):
 
             # Configure the merge operation to update existing records and insert new records
             merge_operation = deltaTable.alias("target") \
-                            .merge(df_source.alias("source"), match_condition) \
-                            .whenMatchedUpdateAll(condition=update_condition) \
-                            .whenNotMatchedInsertAll()
+                .merge(df_source.alias("source"), match_condition) \
+                .whenMatchedUpdate(condition=update_condition, 
+                                    set={field: f"source.{field}" for field in non_match_keys} | {"updated_date_time": "source.updated_date_time"}) \
+                .whenNotMatchedInsertAll()
 
             # Execute the merge operation
             merge_operation.execute()
-            
+                
             print(f"Fact upsert for {table_name} complete.")
         except Exception as e:
             self.logger.error(f"An error occurred in upsert_to_delta_table for table {table_name}: {e}")
@@ -152,7 +165,7 @@ class UpsertSCD1Strategy(UpsertStrategy):
         
         Args:
             config (dict): Configuration for upserting a Delta table including 'table_name', 'dataframe',
-                        'match_keys', and 'delete_unmatched'. Expects audit columns in the dataframe.
+                        and 'match_keys'. Expects audit columns in the dataframe.
             write_method (str): The method to use for saving the table ('default' or 'abfss').
             storage_container_endpoint (str): Endpoint if using 'abfss' write method.
             
@@ -162,16 +175,26 @@ class UpsertSCD1Strategy(UpsertStrategy):
         table_name = config['table_name']
         df_source = config['dataframe']
         match_keys = config['match_keys']
-        key_column = config.get('skey_column')
+        skey_column = config.get('skey_column')
+        nkey_column = config.get('nkey_column')
         current_ts = lit(datetime.datetime.now())
 
-        # If a transformer and a key_column are provided, generate surrogate keys
-        if self.transformer and key_column:
-            # Get the list of columns from the dataframe
-            columns = df_source.columns
+        try:
+            # Determine if all data columns are part of the natural key
+            all_columns_are_match_keys = set(match_keys) == set(df_source.columns)
 
-            # Use key_column as the new_column and match_keys as match_key_columns
-            df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, columns, key_column, match_keys)
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and nkey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_natural_key(df_source, df_source.columns, nkey_column, match_keys)
+                
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and skey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, df_source.columns, skey_column, match_keys)
+        except Exception:
+            self.logger.info(f"Creation of key fields for table {table_name} failed.")
+            raise
 
         try:
             # Attempt to access or create the Delta table
@@ -211,22 +234,36 @@ class UpsertSCD1Strategy(UpsertStrategy):
             # Define match condition for the MERGE operation
             match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
 
-            # Generate excluded column list
-            excluded_columns = match_keys + ["inserted_date_time", "updated_date_time"]
-            if key_column:  
-                excluded_columns.append(key_column)
+            # Begin conditional merge
+            if not all_columns_are_match_keys:
+                # Generate excluded column list
+                excluded_columns = match_keys + ["inserted_date_time", "updated_date_time"]
+                if skey_column:  
+                    excluded_columns.append(skey_column)
+                if nkey_column:  
+                    excluded_columns.append(nkey_column)
 
-            # Get non-match key fields excluding audit fields
-            non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
+                # Get non-match key fields excluding audit fields
+                non_match_keys = [col for col in df_source.columns if col not in excluded_columns]
+                
+                # Create a condition to check if any non-match key field has changed
+                update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
+
+                # Configure the merge operation to update existing records and insert new records
+                merge_operation = deltaTable.alias("target") \
+                    .merge(df_source.alias("source"), match_condition) \
+                    .whenMatchedUpdate(condition=update_condition, 
+                                    set={field: f"source.{field}" for field in non_match_keys} | {"updated_date_time": "source.updated_date_time"}) \
+                    .whenNotMatchedInsertAll()
+            else:
+                # Alternate merge logic: Insert new rows where there's no match, do nothing for matches.
+                merge_operation = deltaTable.alias("target") \
+                    .merge(
+                        source = df_source.alias("source"), 
+                        condition = match_condition
+                    ) \
+                    .whenNotMatchedInsertAll()
             
-            # Create a condition to check if any non-match key field has changed
-            update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
-
-            # Configure the merge operation to update existing records and insert new records
-            merge_operation = deltaTable.alias("target") \
-                            .merge(df_source.alias("source"), match_condition) \
-                            .whenMatchedUpdateAll(condition=update_condition) \
-                            .whenNotMatchedInsertAll()
             # Execute the merge operation
             merge_operation.execute()
 
@@ -291,15 +328,19 @@ class UpsertSCD2Strategy(UpsertStrategy):
         nkey_column = config.get('nkey_column')
         current_ts = lit(datetime.datetime.now())
 
-        # If a transformer is provided, generate surrogate and natural keys
-        if self.transformer and nkey_column:
-            # Use key_column as the new_column and match_keys as match_key_columns
-            df_source = self.transformer.stage_dataframe_with_natural_key(df_source, df_source.columns, nkey_column, match_keys)
-            
-        # If a transformer is provided, generate surrogate and natural keys
-        if self.transformer and skey_column:
-            # Use key_column as the new_column and match_keys as match_key_columns
-            df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, df_source.columns, skey_column, match_keys)
+        try:
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and nkey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_natural_key(df_source, df_source.columns, nkey_column, match_keys)
+                
+            # If a transformer is provided, generate surrogate and natural keys
+            if self.transformer and skey_column:
+                # Use key_column as the new_column and match_keys as match_key_columns
+                df_source = self.transformer.stage_dataframe_with_surrogate_key(df_source, df_source.columns, skey_column, match_keys)
+        except Exception:
+            self.logger.info(f"Creation of key fields for table {table_name} failed.")
+            raise
 
         try:
             # Attempt to access or create the Delta table
@@ -316,7 +357,7 @@ class UpsertSCD2Strategy(UpsertStrategy):
                 df_source = df_source.union(df_unknown) \
                             .withColumn("inserted_date_time", current_ts) \
                             .withColumn("updated_date_time", current_ts) \
-                            .withColumn("effective_from_date_time", current_ts) \
+                            .withColumn("effective_from_date_time", lit(datetime.datetime(1901, 1, 1, 23, 59, 59))) \
                             .withColumn("effective_to_date_time", lit(datetime.datetime(9999, 12, 31, 23, 59, 59))) \
                             .withColumn("is_current", lit(True)) \
                             .withColumn("is_deleted", lit(False))
@@ -383,19 +424,6 @@ class UpsertSCD2Strategy(UpsertStrategy):
 
             # Execute the merge operation
             merge_operation.execute()
-
-            # Handle soft deletes if required
-            if delete_unmatched:
-                delete_expr = {
-                    "is_deleted": lit(True),
-                    "is_current": lit(False),
-                    "updated_date_time": current_ts
-                }
-                merge_operation = deltaTable.alias("target") \
-                                .merge(df_source.alias("source"), match_condition) \
-                                .whenNotMatchedByTargetUpdate(set=delete_expr)
-
-                merge_operation.execute()
             print(f"Dimension upsert for {table_name} complete.")
             
         except Exception as e:
@@ -408,7 +436,7 @@ class UpsertSCD2Strategy(UpsertStrategy):
 
 class UpsertGeneric(UpsertStrategy):
 
-    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+    def upsert_to_table(self, config, storage_container_endpoint=None, write_method='default'):
         """
         Performs an upsert operation (merge) on a Delta table based on the provided configuration.
         
@@ -417,7 +445,6 @@ class UpsertGeneric(UpsertStrategy):
                         'match_keys', and optionally 'delete_unmatched'.
             write_method (str): The method to use for saving the table. Can be either 'default' or 'abfss'.
             storage_container_endpoint (str): Required if save_method is 'abfss'.
-            delete_unmatched (bool): Indicates whether records not present in the source DataFrame should be deleted.
             
         Raises:
             Exception: If the target Delta table does not exist and cannot be created.
@@ -445,7 +472,9 @@ class UpsertGeneric(UpsertStrategy):
 
             # Enhance df_source with audit columns
             current_ts = lit(datetime.datetime.now())
-            df_source = df_source.withColumn("inserted_date_time", current_ts).withColumn("updated_date_time", current_ts)
+            df_source = (df_source.
+                            withColumn("inserted_date_time", current_ts)
+                            .withColumn("updated_date_time", current_ts))
 
             # Define update expressions excluding match keys
             update_expr = {col: f"source.{col}" for col in df_source.columns if col not in match_keys}
@@ -455,10 +484,6 @@ class UpsertGeneric(UpsertStrategy):
                 .merge(df_source.alias("source"), match_condition) \
                 .whenMatchedUpdate(set=update_expr) \
                 .whenNotMatchedInsertAll()
-
-            # Conditionally add delete operation for unmatched source rows
-            if delete_unmatched:
-                merge_operation = merge_operation.whenNotMatchedBySourceDelete()
 
             # Execute the merge operation
             merge_operation.execute()
@@ -484,7 +509,7 @@ class ConcurrentUpsertHandler:
         self.logger = logger
         self.transform_manager = transform_manager
 
-    def upsert_data_concurrently(self, table_configs, storage_container_endpoint=None, write_method='default', delete_unmatched=False):
+    def upsert_data_concurrently(self, table_configs, storage_container_endpoint=None, write_method='default'):
         """
         Performs upsert operations concurrently on multiple tables based on the provided configurations.
         """
@@ -504,7 +529,7 @@ class ConcurrentUpsertHandler:
             strategy = strategy_map.get(config.get('upsert_type', 'generic'), UpsertGeneric(self.spark, self.logger))
 
             # Perform the upsert operation
-            strategy.upsert_to_table(config, storage_container_endpoint, write_method, delete_unmatched)
+            strategy.upsert_to_table(config, storage_container_endpoint, write_method)
 
             # Log a message indicating that the upsert operation is complete
             self.logger.info(f"Upsert for {config['table_name']} completed.")
