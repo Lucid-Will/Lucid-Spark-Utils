@@ -1,8 +1,0 @@
-LICENSE
-README.md
-setup.py
-lucid_control_framework.egg-info/PKG-INFO
-lucid_control_framework.egg-info/SOURCES.txt
-lucid_control_framework.egg-info/dependency_links.txt
-lucid_control_framework.egg-info/requires.txt
-lucid_control_framework.egg-info/top_level.txt

@@ -1,5 +1,8 @@
 from setuptools import setup, find_packages
 
+with open('requirements.txt') as f:
+    requirements = f.read().splitlines()
+
 setup(
     name='lucid-control-framework',
     version='0.1',
@@ -19,13 +22,6 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
     ],
-    install_requires=[
-        'azure-mgmt-resource',
-        'azure-mgmt-keyvault',
-        'azure-keyvault-secrets',
-        'azure-synapse-artifacts',
-        'azure-identity',
-        'pyspark'
-    ],
+    install_requires=requirements,
     python_requires='>=3.6',
 )
