@@ -25,10 +25,7 @@ setup(
         'azure-keyvault-secrets',
         'azure-synapse-artifacts',
         'azure-identity',
-        'pyspark',
-        'logging',
-        'functools',
-        'typing',
+        'pyspark'
     ],
     python_requires='>=3.6',
 )
