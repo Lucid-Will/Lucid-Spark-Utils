@@ -1,0 +1,9 @@
+azure-mgmt-resource
+azure-mgmt-keyvault
+azure-keyvault-secrets
+azure-synapse-artifacts
+azure-identity
+pyspark
+logging
+functools
+typing
