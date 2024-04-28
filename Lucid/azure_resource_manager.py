@@ -1,54 +1,15 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# ## AzureResourceManager
-# 
-# New notebook
-
-# In[ ]:
-
-
 import logging
-
-
-# In[ ]:
-
-
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.keyvault import KeyVaultManagementClient
 from azure.keyvault.secrets import SecretClient
 from azure.synapse.artifacts import ArtifactsClient
 from azure.identity import ClientSecretCredential
 from azure.core.exceptions import AzureError
-
-
-# In[ ]:
-
-
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql import SparkSession, DataFrame
-
-
-# In[ ]:
-
-
 from functools import reduce
-
-
-# In[ ]:
-
-
 from typing import Dict, Any, List, Optional, Tuple
-
-
-# In[ ]:
-
-
 from utility_manager import UtilityManager
-
-
-# In[ ]:
-
 
 class AzureResourceManager:
     """
@@ -559,8 +520,7 @@ class AzureResourceManager:
             df_keyvaults_and_secrets.createOrReplaceTempView("keyvaults_and_secrets")
 
             # Perform the joins and transformations using Spark SQL
-            spark = SparkSession.builder.getOrCreate()
-            df_azure_system_master = spark.sql("""
+            df_azure_system_master = self.spark.sql("""
                 SELECT
                     s.tenant_id,
                     s.subscription_id,
@@ -603,4 +563,3 @@ class AzureResourceManager:
             # Log the error message and re-raise the exception
             self.logger.error(f"An unexpected error occurred in transform_and_stage_azure_system_details: {e}")
             raise
-

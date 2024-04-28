@@ -1,18 +1,4 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# ## UtilityManager
-# 
-# New notebook
-
-# In[ ]:
-
-
 import logging
-
-
-# In[ ]:
-
 
 class UtilityManager:
     # Initialize a logger for this module
@@ -74,4 +60,3 @@ class UtilityManager:
             raise
 
         return key_vault_secret
-
