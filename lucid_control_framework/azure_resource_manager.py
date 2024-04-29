@@ -9,7 +9,7 @@ from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql import SparkSession, DataFrame
 from functools import reduce
 from typing import Dict, Any, List, Optional, Tuple
-from utility_manager import UtilityManager
+from .utility_manager import UtilityManager
 
 class AzureResourceManager:
     """

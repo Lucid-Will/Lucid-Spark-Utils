@@ -4,7 +4,7 @@ with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
 setup(
-    name='lucid',
+    name='lucid_control_framework',
     version='0.2',
     packages=find_packages(),
     description='Lucid Control Framework',
