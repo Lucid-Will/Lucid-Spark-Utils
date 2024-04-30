@@ -1,10 +1,10 @@
-# Import the required libraries
 import logging
 from typing import Optional
 import sempy.fabric as fabric
 from azure.core.exceptions import AzureError
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import StructType, StructField, StringType, BooleanType
+from pyspark.sql.functions import col
 
 class FabricResourceManager:
     """
@@ -64,10 +64,10 @@ class FabricResourceManager:
         
         try:
             # Direct fetch, assuming this returns a list of dictionaries
-            workspaces_data = self.fabric_client.list_workspaces(filter=filter_expression)
+            workspaces = fabric.list_workspaces(filter=filter_expression)
             
             # Convert directly to Spark DataFrame with inferred schema
-            df_fabric_workspace_spark = self.spark.createDataFrame(workspaces_data, schema=schema)
+            df_fabric_workspace_spark = self.spark.createDataFrame(workspaces, schema=schema)
 
             return df_fabric_workspace_spark
         except AzureError as e:
@@ -100,10 +100,10 @@ class FabricResourceManager:
         
         try:
             # Directly fetch capacity data into a format that Spark can handle (assuming list of dictionaries)
-            capacities_data = self.fabric_client.list_capacities(filter_expression=filter_expression) if filter_expression else self.fabric_client.list_capacities()
+            capacities = fabric.list_capacities(filter_expression=filter_expression) if filter_expression else fabric.list_capacities()
             
             # Convert directly to Spark DataFrame with inferred schema
-            df_fabric_capacity_spark = self.spark.createDataFrame(capacities_data, schema=schema)
+            df_fabric_capacity_spark = self.spark.createDataFrame(capacities, schema=schema)
 
             return df_fabric_capacity_spark
         except AzureError as e:
@@ -135,13 +135,32 @@ class FabricResourceManager:
         ])
         
         try:
-            # Fetch item data with an optional filter
-            items_data = self.fabric_client.list_items(filter_expression=filter_expression) if filter_expression else self.fabric_client.list_items()
-            
-            # Convert to Spark DataFrame with inferred schema
-            df_fabric_item_spark = self.spark.createDataFrame(items_data, schema=schema)
+            # Filter workspaces on dedicated capacity and collect their IDs
+            workspaces = (fabric.list_workspaces()
+                .filter(col('is_on_dedicated_capacity') == 1)
+                .select('id')
+                .collect())
 
-            return df_fabric_item_spark
+            # Initialize an empty DataFrame to aggregate items from each workspace
+            df_items_all = None
+
+            # Aggregate items from each workspace with dedicated capacity
+            for ws in workspaces:
+                ws_id = ws['id']
+                
+                # Apply filter_expression if it exists, otherwise call list_items for the workspace
+                items = fabric.list_items(workspace=ws_id, filter_expression=filter_expression) if filter_expression else fabric.list_items(workspace=ws_id)
+                
+                # Create a DataFrame from the list of items
+                df_items = self.spark.createDataFrame(items, schema=schema)
+                
+                # Union the current items DataFrame with the aggregated items DataFrame
+                if df_items_all is None:
+                    df_items_all = df_items
+                else:
+                    df_items_all = df_items_all.union(df_items)
+
+            return df_items_all
         except AzureError as e:
             self.logger.error(f"An Azure service error occurred in get_fabric_item_dataframe: {e}")
             raise
@@ -209,7 +228,7 @@ class FabricResourceManager:
                     capacities c ON LOWER(w.capacity_id) = LOWER(c.id)
                 INNER JOIN 
                     item_details id ON LOWER(w.id) = LOWER(id.workspace_id)
-            """, {"tenant_id": self.tenant_id})
+            """)
 
             return df_fabric_system_master
         except Exception as e:
