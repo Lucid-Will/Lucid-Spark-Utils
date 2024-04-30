@@ -1,6 +1,3 @@
-# Install semantic-link package
-!pip install semantic-link --q
-
 # Import the required libraries
 import logging
 from typing import Optional

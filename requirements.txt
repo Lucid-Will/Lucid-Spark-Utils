@@ -3,3 +3,4 @@ azure-mgmt-keyvault==9.0.0
 azure-keyvault-secrets==4.3.0
 azure-synapse-artifacts==0.7.0
 azure-identity==1.6.1
+semantic-link
