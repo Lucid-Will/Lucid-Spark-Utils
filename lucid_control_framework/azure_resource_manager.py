@@ -13,7 +13,7 @@ from .utility_manager import UtilityManager
 
 class AzureResourceManager:
     """
-    The AzureResourceManager class is responsible for managing Azure resources.
+    The AzureResourceManager class is responsible for collecting and logging details related to Azure resources.
     It takes Azure credentials (tenant_id, client_id, client_secret) upon instantiation.
     These credentials are used to create a ClientSecretCredential object for Azure operations.
     """
