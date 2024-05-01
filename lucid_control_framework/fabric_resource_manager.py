@@ -136,10 +136,7 @@ class FabricResourceManager:
         
         try:
             # Filter workspaces on dedicated capacity and collect their IDs
-            workspaces = (fabric.list_workspaces()
-                .filter(col('is_on_dedicated_capacity') == 1)
-                .select('id')
-                .collect())
+            workspaces = self.get_fabric_workspace_dataframe().where(col('is_on_dedicated_capacity') == 1).select('id').collect()
 
             # Initialize an empty DataFrame to aggregate items from each workspace
             df_items_all = None
