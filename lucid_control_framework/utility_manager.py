@@ -1,18 +1,17 @@
 import logging
 
 class UtilityManager:
-    # Initialize a logger for this module
-    logger = logging.getLogger(__name__)
-
     @staticmethod
-    def flatten_properties(azure_object):
+    def flatten_properties(azure_object, logger=None):
         """
         Flattens properties of an Azure object to a dictionary for DataFrame compatibility.
-        Args:
-            azure_object (object): The Azure object instance to be flattened. This should be an instance of a class from the `azure` package.
-        Returns:
-            dict: A dictionary containing the flattened properties of the Azure object.
+
+        :param azure_object: The Azure object instance to be flattened. This should be an instance of a class from the `azure` package.
+        :param logger: The logger to use. If not provided, a default logger will be used.
+        :return: A dictionary containing the flattened properties of the Azure object.
         """
+        logger = logger if logger else logging.getLogger(__name__)
+
         try:
             # Initialize an empty dictionary to store the flattened object
             flat_object = {}
@@ -34,20 +33,22 @@ class UtilityManager:
 
         except AttributeError as e:
             # Log any attribute errors that occur during the flattening process
-            UtilityManager.logger.error(f"An unexpected error occurred in flatten_properties: {e}")
+            logger.error(f"An unexpected error occurred in flatten_properties: {e}")
             raise
 
     @staticmethod
-    def get_secret_value(key_vault_name, secret_name):
+    def get_secret_value(key_vault_name, secret_name, logger=None):
         """
         Retrieves a secret value from Azure Key Vault.
-        Args:
-            key_vault_name (str): The name of the key vault.
-            secret_name (str): The name of the secret within the key vault.
-        Returns:
-            str: The value of the secret retrieved from Azure Key Vault.
+
+        :param key_vault_name: The name of the key vault.
+        :param secret_name: The name of the secret within the key vault.
+        :param logger: The logger to use. If not provided, a default logger will be used.
+        :return: The value of the secret retrieved from Azure Key Vault.
         """
         
+        logger = logger if logger else logging.getLogger(__name__)
+
         # Construct the vault URL using the key_vault_name
         key_vault_url = f"https://{key_vault_name}.vault.azure.net/"
 
@@ -56,7 +57,7 @@ class UtilityManager:
             key_vault_secret = mssparkutils.credentials.getSecret(key_vault_url, secret_name)
         except mssparkutils.credentials.SecretRetrievalError as e:
             # Log any errors that occur during the secret retrieval process
-            UtilityManager.logger.error(f"Failed to retrieve secret from Key Vault: {e}")
+            logger.error(f"Failed to retrieve secret from Key Vault: {e}")
             raise
 
         return key_vault_secret
