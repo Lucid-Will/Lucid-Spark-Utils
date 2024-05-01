@@ -1,5 +1,5 @@
 from . import UpsertFact, UpsertSCD2, UpsertSCD1, UpsertGeneric
-from ..dataframe_transformation_manager import TransformManager
+from lucid_control_framework.dataframe_transformation_manager import DataFrameTransformationManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
 import logging
@@ -19,7 +19,7 @@ class UpsertHandler:
         """
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
-        self.transform_manager = TransformManager()
+        self.transform_manager = DataFrameTransformationManager(self.spark)
 
         # Create a single instance of each strategy class
         self.strategy_map = {

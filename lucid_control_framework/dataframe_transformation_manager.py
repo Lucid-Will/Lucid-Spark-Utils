@@ -11,8 +11,7 @@ class DataFrameTransformationManager:
         self.logger = logging
         self.spark = spark
 
-    def stage_dataframe_with_key(self, dataframe: DataFrame, columns: list, new_column: str = None, 
-                                 match_key_columns: list = None, include_timestamp: bool = False) -> DataFrame:
+    def stage_dataframe_with_key(self, dataframe: DataFrame, columns: list, new_column: str = None, match_key_columns: list = None, include_timestamp: bool = False) -> DataFrame:
         """
         Transforms a DataFrame by adding a new column with an integer hash based on specified key columns.
         Optionally includes the current timestamp in the hash calculation to ensure uniqueness over time.

@@ -1,4 +1,5 @@
 import logging
+from notebookutils import mssparkutils
 
 class UtilityManager:
     @staticmethod
