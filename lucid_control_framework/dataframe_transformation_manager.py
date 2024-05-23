@@ -1,55 +1,63 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pyspark.sql.functions import col, concat_ws, abs, hash, current_timestamp
+from pyspark.sql.functions import concat_ws, abs, hash
 from pyspark.sql import DataFrame
+from typing import List, Optional, Callable, Tuple
 import logging
 import os
 
-
 class DataFrameTransformationManager:
-    def __init__(self, spark):
+    def __init__(self, spark, logger=None):
         
-        self.logger = logging
+        self.logger = logger if logger else logging.getLogger(__name__)
         self.spark = spark
 
-    def stage_dataframe_with_key(self, dataframe: DataFrame, columns: list, new_column: str = None, match_key_columns: list = None, include_timestamp: bool = False) -> DataFrame:
+    def stage_dataframe_with_keys(self, target_table: str, dataframe: DataFrame, columns: List[str], skey_column: Optional[str] = None, nkey_column: Optional[str] = None, match_key_columns: Optional[List[str]] = None) -> Optional[DataFrame]:
         """
         Transforms a DataFrame by adding a new column with an integer hash based on specified key columns.
-        Optionally includes the current timestamp in the hash calculation to ensure uniqueness over time.
+        It also adds a surrogate key column with values starting from the maximum key in the target table plus one.
 
+        :param target_table: The target table to check for the maximum key.
         :param dataframe: The source DataFrame.
         :param columns: List of column names to include in the transformation.
-        :param new_column: The name of the new column to be added with the hash.
+        :param skey_column: The name of the new surrogate key column to be added.
+        :param nkey_column: The name of the new natural key column to be added.
         :param match_key_columns: List of columns to use for hash generation.
-        :param include_timestamp: Flag to include a timestamp in the hash generation.
 
-        :return: Transformed DataFrame with the new column added, if specified.
+        :return: Transformed DataFrame with the new columns added, if specified.
 
         Example:
             df = spark.createDataFrame([(1, "John", "Doe"), (2, "Jane", "Doe")], ["ID", "First Name", "Last Name"])
-            df_transformed = stage_dataframe_with_key(df, ["ID", "First Name"], "hash_key", ["ID", "First Name"], True)
+            df_transformed = stage_dataframe_with_keys("target_table", df, ["ID", "First Name"], "skey", "nkey", ["ID", "First Name"])
         """
         try:
-            # Select specified columns and remove duplicate rows.
-            df_transformed = dataframe.select(*columns).distinct()
+            # Select the specified columns
+            df_transformed = dataframe.select(*columns)
+            
+            # If table exists retrieve max key
+            max_key = self.spark.sql(f"""
+                    SELECT IF(
+                        EXISTS (SELECT 1 FROM {target_table}),
+                        (SELECT MAX({skey_column}) FROM {target_table}),
+                        0
+                    )
+                """).collect()[0][0]
+            
+            if match_key_columns:
+                # Generate an integer hash based on the match_key_columns and add it as the natural key column
+                concat_cols = concat_ws('_', *[df_transformed[col] for col in match_key_columns])
+                df_transformed = df_transformed.withColumn(nkey_column, abs(hash(concat_cols))).select(nkey_column, *columns)
 
-            if new_column and match_key_columns:
-                # Concatenate key columns into a single string, separated by '_'.
-                concat_cols = concat_ws('_', *[col(k) for k in match_key_columns])
+            # Increment max key by 1 and add it as the surrogate key column
+            df_transformed = df_transformed.withColumn(skey_column, max_key + 1).select(skey_column, *columns)
 
-                # If requested, add the current timestamp to the hash input to ensure uniqueness.
-                if include_timestamp:
-                    concat_cols = concat_ws('_', concat_cols, current_timestamp())
-
-                # Create a new column with a hash of the concatenated key columns.
-                df_transformed = df_transformed.withColumn(new_column, abs(hash(concat_cols)))
-
+            # Return the transformed dataframe
             return df_transformed
         except Exception as e:
-            # Log the error and re-raise to allow for external handling.
-            self.logger.error(f"Failed to transform DataFrame with new key column {new_column}: {e}")
-            raise
+            # Log the error message and return None if an error occurs
+            self.logger.error(f"An error occurred while transforming the dataframe with columns {columns}, match_key_columns {match_key_columns}, and new column {new_column}: {e}")
+            return None
 
-    def execute_transformations_concurrently(self, transformations: list) -> list:
+    def execute_transformations_concurrently(self, transformations: List[Tuple[Callable, Tuple]]) -> List:
         """
         Executes multiple DataFrame transformation tasks concurrently, improving performance on multi-core systems.
 

@@ -14,19 +14,27 @@ from utility_manager import UtilityManager
 class AzureResourceManager:
     """
     The AzureResourceManager class is responsible for collecting and logging details related to Azure resources.
-    It takes Azure credentials (tenant_id, client_id, client_secret) upon instantiation.
+
+    :param tenant_id: The Azure tenant ID.
+    :param client_id: The Azure client ID.
+    :param client_secret: The Azure client secret.
+
     These credentials are used to create a ClientSecretCredential object for Azure operations.
+
+    Example:
+        azure_resource_manager = AzureResourceManager(tenant_id="your_tenant_id", client_id="your_client_id", client_secret="your_client_secret")
     """
+
     def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None:
         """
         Initializes the AzureResourceManager with the provided Azure credentials.
-        Args:
-            tenant_id (str): The Azure tenant ID.
-            client_id (str): The Azure client ID.
-            client_secret (str): The Azure client secret.
-        Raises:
-            ValueError: If any of the Azure credentials are not provided.
-            Exception: If there's a problem initializing the AzureResourceManager.
+
+        :param tenant_id: The Azure tenant ID.
+        :param client_id: The Azure client ID.
+        :param client_secret: The Azure client secret.
+
+        :raises ValueError: If any of the Azure credentials are not provided.
+        :raises Exception: If there's a problem initializing the AzureResourceManager.
         """
         # If tenant_id, client_id, or client_secret are not provided, raise an exception
         if not tenant_id or not client_id or not client_secret:
@@ -62,9 +70,13 @@ class AzureResourceManager:
     @property
     def subscription_client(self) -> SubscriptionClient:
         """
-        This property returns a SubscriptionClient object.
-        If the object has not been created yet, it is created using the provided Azure credentials.
-        If Azure credentials are not provided, an exception is raised.
+        Returns a SubscriptionClient object. If the object has not been created yet, it is created using the provided Azure credentials.
+
+        :return: A SubscriptionClient object.
+        :raises Exception: If Azure credentials are not provided.
+
+        Example:
+            subscription_client = azure_resource_manager.subscription_client()
         """
         try:
             # If _subscription_client is not set yet, create a SubscriptionClient object
@@ -81,9 +93,15 @@ class AzureResourceManager:
     
     def get_resource_client(self, subscription_id: str) -> ResourceManagementClient:
         """
-        This method returns a ResourceManagementClient object for the given subscription_id.
+        Returns a ResourceManagementClient object for the given subscription_id.
         If the object has not been created yet, it is created using the provided Azure credentials.
-        If Azure credentials are not provided, an exception is raised.
+
+        :param subscription_id: The subscription ID to create the ResourceManagementClient for.
+        :return: A ResourceManagementClient object.
+        :raises Exception: If Azure credentials are not provided.
+
+        Example:
+            resource_management_client = azure_resource_manager.resource_management_client("your_subscription_id")
         """
         try:
             # If a ResourceManagementClient for the given subscription_id is not set yet, create one
@@ -100,9 +118,15 @@ class AzureResourceManager:
     
     def get_keyvault_client(self, subscription_id: str) -> KeyVaultManagementClient:
         """
-        This method returns a KeyVaultManagementClient object for the given subscription_id.
+        Returns a KeyVaultManagementClient object for the given subscription_id.
         If the object has not been created yet, it is created using the provided Azure credentials.
-        If Azure credentials are not provided, an exception is raised.
+
+        :param subscription_id: The subscription ID to create the KeyVaultManagementClient for.
+        :return: A KeyVaultManagementClient object.
+        :raises Exception: If Azure credentials are not provided.
+
+        Example:
+            key_vault_management_client = azure_resource_manager.key_vault_management_client("your_subscription_id")
         """
         try:
             # If a KeyVaultManagementClient for the given subscription_id is not set yet, create one
@@ -120,10 +144,12 @@ class AzureResourceManager:
     def get_subscriptions_dataframe(self) -> DataFrame:
         """
         Fetches all Azure subscriptions and returns them in a Spark DataFrame with an explicitly defined schema.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing subscription details.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :return: DataFrame containing subscription details.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            subscriptions_df = azure_resource_manager.fetch_subscriptions()
         """
         schema = StructType([
             StructField("authorization_source", StringType(), True),
@@ -138,8 +164,9 @@ class AzureResourceManager:
         def fetch_subscriptions():
             """
             Fetches all Azure subscriptions.
-            Returns:
-                List: List of all Azure subscriptions.
+
+            :return: List of all Azure subscriptions.
+            :raises AzureError: If there's a problem with the Azure service.
             """
             try:
                 return list(self.subscription_client.subscriptions.list())
@@ -153,10 +180,12 @@ class AzureResourceManager:
         def process_subscription(subscription: Dict[str, Any]):
             """
             Processes a subscription to extract and return subscription details.
-            Args:
-                subscription (Dict[str, Any]): A dictionary containing subscription details.
-            Returns:
-                Dict: Dictionary containing processed subscription details.
+
+            :param subscription: A dictionary containing subscription details.
+            :return: Dictionary containing processed subscription details.
+
+            Example:
+                processed_subscription = azure_resource_manager.process_subscription(subscription)
             """
             try:
                 return UtilityManager.flatten_properties(subscription)
@@ -173,10 +202,12 @@ class AzureResourceManager:
     def get_resource_group_dataframe(self) -> DataFrame:
         """
         Fetches all resource groups across all subscriptions and returns them in a Spark DataFrame with an explicitly defined schema.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing resource group details.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :return: DataFrame containing resource group details.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            resource_groups_df = azure_resource_manager.fetch_all_resource_groups()
         """
         schema = StructType([
             StructField("id", StringType(), True),
@@ -192,8 +223,8 @@ class AzureResourceManager:
         def fetch_resource_groups():
             """
             Fetches all resource groups across all subscriptions.
-            Returns:
-                List[Tuple]: List of tuples where each tuple contains a resource group and its associated subscription ID.
+            
+            :return: List[Tuple]: List of tuples where each tuple contains a resource group and its associated subscription ID.
             """
             try:
                 return [(rg, sub.subscription_id) for sub in self.subscription_client.subscriptions.list()
@@ -208,10 +239,12 @@ class AzureResourceManager:
         def process_resource_group(resource_group_tuple: Tuple[Any, str]):
             """
             Processes a resource group tuple to extract and return resource group details.
-            Args:
-                resource_group_tuple (Tuple[Any, str]): A tuple containing a resource group and its associated subscription ID.
-            Returns:
-                Dict: Dictionary containing resource group details.
+
+            :param resource_group_tuple: A tuple containing a resource group and its associated subscription ID.
+            :return: Dictionary containing resource group details.
+
+            Example:
+                processed_resource_group = azure_resource_manager.process_resource_group_tuple(resource_group_tuple)
             """
             try:
                 resource_group, subscription_id = resource_group_tuple
@@ -231,10 +264,12 @@ class AzureResourceManager:
     def get_resource_dataframe(self) -> DataFrame:
         """
         Fetches all resources across all resource groups and subscriptions and returns them in a Spark DataFrame with an explicitly defined schema.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing resource details.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :return: DataFrame containing resource details.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            resources_df = azure_resource_manager.fetch_all_resources()
         """
         # Define the schema for the DataFrame
         schema = StructType([
@@ -261,10 +296,12 @@ class AzureResourceManager:
         def fetch_resources() -> List[Tuple[Any, str, str]]:
             """
             Fetches all resources across all resource groups and subscriptions.
-            Returns:
-                List[Tuple[Any, str, str]]: A list of tuples, each containing a resource, a subscription ID, and a resource group name.
-            Raises:
-                Exception: If there's a problem fetching the resources.
+
+            :return: A list of tuples, each containing a resource, a subscription ID, and a resource group name.
+            :raises Exception: If there's a problem fetching the resources.
+
+            Example:
+                resources = azure_resource_manager.fetch_resources()
             """
             try:
                 return [(res, sub.subscription_id, rg.name) for sub in self.subscription_client.subscriptions.list()
@@ -277,12 +314,13 @@ class AzureResourceManager:
         def process_resource(resource_tuple: Tuple[Any, str, str]) -> Dict[str, Any]:
             """
             Processes a resource tuple and returns a dictionary with the resource details.
-            Args:
-                resource_tuple (Tuple[Any, str, str]): A tuple containing a resource, a subscription ID, and a resource group name.
-            Returns:
-                Dict[str, Any]: A dictionary with the resource details.
-            Raises:
-                Exception: If there's a problem processing the resource.
+
+            :param resource_tuple: A tuple containing a resource, a subscription ID, and a resource group name.
+            :return: A dictionary with the resource details.
+            :raises Exception: If there's a problem processing the resource.
+
+            Example:
+                processed_resource = azure_resource_manager.process_resource(resource_tuple)
             """
             try:
                 resource, subscription_id, resource_group_name = resource_tuple
@@ -305,10 +343,12 @@ class AzureResourceManager:
     def get_keyvaults_and_secrets_dataframe(self) -> DataFrame:
         """
         Fetches all key vaults and secret names across all subscriptions and returns them in a Spark DataFrame with an explicitly defined schema.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing key vault and secret names.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :return: DataFrame containing key vault and secret names.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            key_vaults_and_secrets_df = azure_resource_manager.fetch_all_key_vaults_and_secrets()
         """
         schema = StructType([
             StructField("key_vault_name", StringType(), True),
@@ -349,10 +389,12 @@ class AzureResourceManager:
     def get_locations_dataframe(self) -> DataFrame:
         """
         Fetches all Azure locations (regions) and returns them in a Spark DataFrame with an explicitly defined schema.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing location details.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :return: DataFrame containing location details.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            locations_df = azure_resource_manager.get_locations_dataframe()
         """
         # Define the schema for the DataFrame
         schema = StructType([
@@ -364,11 +406,13 @@ class AzureResourceManager:
         def fetch_locations():
             """
             Fetches all Azure locations for the first subscription.
-            Returns:
-                list: List of all Azure locations.
-            Raises:
-                AzureError: If there's a problem with the Azure service.
-                Exception: If no subscriptions are found.
+
+            :return: List of all Azure locations.
+            :raises AzureError: If there's a problem with the Azure service.
+            :raises Exception: If no subscriptions are found.
+
+            Example:
+                locations = fetch_locations()
             """
             try:
                 # Get the first subscription
@@ -389,10 +433,12 @@ class AzureResourceManager:
         def process_locations(locations):
             """
             Processes a list of locations to extract and return location details.
-            Args:
-                locations (list): A list of Azure locations.
-            Returns:
-                list: List of dictionaries containing location details.
+
+            :param locations: A list of Azure locations.
+            :return: List of dictionaries containing location details.
+
+            Example:
+                processed_locations = azure_resource_manager.process_locations(locations)
             """
             return [
                 {
@@ -412,15 +458,16 @@ class AzureResourceManager:
         # Convert the location data to a Spark DataFrame using the defined schema
         return self.spark.createDataFrame(locations_data, schema=schema)
 
-    def get_pipelines_dataframe(self, workspace_name) -> DataFrame:
+    def get_pipelines_dataframe(self, workspace_name: str) -> DataFrame:
         """
         Fetches Synapse Analytics pipelines for a specified workspace and returns them in a Spark DataFrame with an explicitly defined schema.
-        Args:
-            workspace_name (str): The name of the Synapse workspace to fetch pipelines from.
-        Returns:
-            pyspark.sql.DataFrame: Spark DataFrame containing pipeline details.
-        Raises:
-            AzureError: If there's a problem with the Azure service.
+
+        :param workspace_name: The name of the Synapse workspace to fetch pipelines from.
+        :return: Spark DataFrame containing pipeline details.
+        :raises AzureError: If there's a problem with the Azure service.
+
+        Example:
+            pipelines_df = azure_resource_manager.get_pipelines_dataframe("your_workspace_name")
         """
         # Define the schema for the DataFrame
         schema = StructType([
@@ -440,10 +487,12 @@ class AzureResourceManager:
         def fetch_pipelines():
             """
             Fetches all pipelines in the specified Synapse workspace.
-            Returns:
-                list: List of all pipelines in the workspace.
-            Raises:
-                AzureError: If there's a problem with the Azure service.
+
+            :return: List of all pipelines in the workspace.
+            :raises AzureError: If there's a problem with the Azure service.
+
+            Example:
+                pipelines = fetch_pipelines()
             """
             try:
                 # Construct the workspace URL
@@ -462,10 +511,12 @@ class AzureResourceManager:
         def process_pipelines(pipelines):
             """
             Processes a list of pipelines to extract and return pipeline details.
-            Args:
-                pipelines (list): A list of pipelines.
-            Returns:
-                list: List of dictionaries containing pipeline details.
+
+            :param pipelines: A list of pipelines.
+            :return: List of dictionaries containing pipeline details.
+
+            Example:
+                processed_pipelines = process_pipelines(pipelines)
             """
             return [
                 {"workspace_name": workspace_name, **UtilityManager.flatten_properties(pipeline)}
@@ -485,9 +536,12 @@ class AzureResourceManager:
         """
         Fetches, prepares, transforms, and stages Azure details for subscriptions, resource groups, resources, locations, 
         and pipelines, creating Spark DataFrames optimized for upsert operations into Delta tables.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing detailed and transformed information about the Azure system, 
-            including subscriptions, resource groups, resources, locations, and pipelines, ready for upsert.
+
+        :return: DataFrame containing detailed and transformed information about the Azure system, 
+                including subscriptions, resource groups, resources, locations, and pipelines, ready for upsert.
+
+        Example:
+            azure_details_df = azure_resource_manager.fetch_and_prepare_azure_details()
         """
         try:
             # Fetch details and convert to DataFrames using the AzureResourceManager methods
@@ -557,6 +611,11 @@ class AzureResourceManager:
                     ON s.subscription_id = kvs.subscription_id
             """)
 
+            # Write the transformed DataFrame to the Delta layer
+            df_azure_system_master.write.format('delta').mode('overwrite').saveAsTable('Control.stage_azure_system_master')
+
+            print('Azure system details have been successfully transformed and staged.')
+            
             return df_azure_system_master
         
         except Exception as e:

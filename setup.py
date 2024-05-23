@@ -5,7 +5,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='lucid_control_framework',
-    version='0.3',
+    version='1.0',
     packages=find_packages(),
     description='Lucid Control Framework',
     long_description=open('README.md').read(),

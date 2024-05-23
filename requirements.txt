@@ -1,6 +1,12 @@
-azure-mgmt-resource==2.2.0
-azure-mgmt-keyvault==9.0.0
-azure-keyvault-secrets==4.3.0
-azure-synapse-artifacts==0.7.0
-azure-identity==1.6.1
+azure-core
+azure-identity
+azure-keyvault
+azure-keyvault-secrets
+azure-mgmt-keyvault
+azure-mgmt-datamigration
+azure-mgmt-resource
+azure-mgmt-subscription
+azure-mgmt-synapse
+azure-synapse-artifacts
 semantic-link
+pandas

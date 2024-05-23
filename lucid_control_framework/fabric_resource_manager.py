@@ -16,13 +16,15 @@ class FabricResourceManager:
     def __init__(self):
         """
         Initializes the `FabricResourceManager` instance.
-        
+
         Sets up a logger with the name of the current module and sets its level to INFO.
         Initializes a SparkSession with the app name "AzureFabricManager".
         Attempts to initialize a `FabricRestClient`. If this fails, it logs the error and re-raises the exception.
-        
-        Raises:
-            Exception: If there's a problem initializing the `FabricRestClient`.
+
+        :raises Exception: If there's a problem initializing the `FabricRestClient`.
+
+        Example:
+            fabric_resource_manager = FabricResourceManager()
         """
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
@@ -41,12 +43,15 @@ class FabricResourceManager:
         """
         Fetches workspace data from Azure Fabric, applying optional filtering, and returns it as a Spark DataFrame.
         The schema is explicitly defined.
-        Args:
-            additional_filters (Optional[str], optional): Additional OData filter expressions to refine the fetched workspaces.
-        Returns:
-            pyspark.sql.DataFrame: Spark DataFrame containing the workspace data, with an inferred schema.
-        Raises:
-            AzureError: If there's a problem with the Azure Fabric service.
+
+        :param additional_filters: Additional OData filter expressions to refine the fetched workspaces. Defaults to None.
+        :return: Spark DataFrame containing the workspace data, with an inferred schema.
+
+        :raises AzureError: If there's a problem with the Azure Fabric service.
+
+        Example:
+            additional_filters = "name eq 'workspace1' or name eq 'workspace2'"
+            workspace_data = fabric_resource_manager.fetch_workspace_data(additional_filters)
         """
         default_filter = "type ne 'AdminInsights'"
         filter_expression = f"({default_filter}) and ({additional_filters})" if additional_filters else default_filter
@@ -81,12 +86,15 @@ class FabricResourceManager:
         """
         Fetches capacity data from Azure Fabric, applying an optional filter expression, and returns it as a Spark DataFrame.
         The schema is explicitly defined.
-        Args:
-            filter_expression (Optional[str], optional): The OData filter expression to apply when fetching capacities.
-        Returns:
-            pyspark.sql.DataFrame: Spark DataFrame containing the capacity data, with an inferred schema.
-        Raises:
-            AzureError: If there's a problem with the Azure Fabric service.
+
+        :param filter_expression: The OData filter expression to apply when fetching capacities. Defaults to None.
+        :return: Spark DataFrame containing the capacity data, with an inferred schema.
+
+        :raises AzureError: If there's a problem with the Azure Fabric service.
+
+        Example:
+            filter_expression = "name eq 'capacity1' or name eq 'capacity2'"
+            capacity_data = fabric_resource_manager.fetch_capacity_data(filter_expression)
         """
 
         # Define the schema for the capacity DataFrame
@@ -117,12 +125,15 @@ class FabricResourceManager:
         """
         Fetches and prepares item data from Azure Fabric with an optional filter, returning it as a Spark DataFrame.
         The schema is inferred based on the data structure of the input.
-        Args:
-            filter_expression (Optional[str], optional): The filter expression to apply when fetching item data.
-        Returns:
-            pyspark.sql.DataFrame: Spark DataFrame containing the filtered item data, with an inferred schema.
-        Raises:
-            AzureError: If there's a problem with the Azure Fabric service.
+
+        :param filter_expression: The filter expression to apply when fetching item data. Defaults to None.
+        :return: Spark DataFrame containing the filtered item data, with an inferred schema.
+
+        :raises AzureError: If there's a problem with the Azure Fabric service.
+
+        Example:
+            filter_expression = "name eq 'item1' or name eq 'item2'"
+            item_data = fabric_resource_manager.fetch_item_data(filter_expression)
         """
 
         # Define the schema for the item DataFrame
@@ -167,11 +178,16 @@ class FabricResourceManager:
 
     def transform_and_stage_fabric_system_details(self, tenant_id: str) -> DataFrame:
         """
-        Fetches, prepares, transforms, and stages Azure Fabric system details for workspaces, capacities, items, and locations, 
-        creating Spark DataFrames optimized for upsert operations into Delta tables.
-        Returns:
-            pyspark.sql.DataFrame: DataFrame containing detailed and transformed information about the Azure Fabric system, 
-            including workspaces, capacities, items, and locations, ready for upsert.
+        Fetches, prepares, transforms, and stages Azure Fabric system details for workspaces, capacities, and items, 
+        creating Spark DataFrames.
+
+        :return: DataFrame containing detailed and transformed information about the Azure Fabric system, 
+                including workspaces, capacities, and items.
+
+        :raises AzureError: If there's a problem with the Azure Fabric service.
+
+        Example:
+            system_details = fabric_resource_manager.fetch_and_prepare_system_details()
         """
         try:
             # Fetch details and convert to DataFrames
@@ -226,6 +242,11 @@ class FabricResourceManager:
                 INNER JOIN 
                     item_details id ON LOWER(w.id) = LOWER(id.workspace_id)
             """)
+
+            # Write the transformed DataFrame to the Delta layer
+            df_fabric_system_master.write.format('delta').mode('overwrite').saveAsTable('Control.stage_fabric_system_master')
+
+            print('Fabric system details have been successfully transformed and staged.')
 
             return df_fabric_system_master
         except Exception as e:

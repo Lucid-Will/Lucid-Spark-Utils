@@ -1,4 +1,4 @@
-from . import UpsertFact, UpsertSCD2, UpsertSCD1, UpsertGeneric
+from . import UpsertFact, UpsertSCD2, UpsertSCD1
 from lucid_control_framework.dataframe_transformation_manager import DataFrameTransformationManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
@@ -25,8 +25,7 @@ class UpsertHandler:
         self.strategy_map = {
             'fact': UpsertFact(self.spark, self.logger, self.transform_manager),
             'scd2': UpsertSCD2(self.spark, self.logger, self.transform_manager),
-            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager),
-            'generic': UpsertGeneric(self.spark, self.logger, self.transform_manager)
+            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager)
         }
 
     def upsert_data_concurrently(self, table_configs: List[Dict], storage_container_endpoint: Optional[str] = None, write_method: str = 'default'):
@@ -44,8 +43,8 @@ class UpsertHandler:
 
             :param config: The table configuration.
             """
-            # Get the strategy for the upsert type specified in the config, or use the generic strategy by default
-            strategy = self.strategy_map.get(config.get('upsert_type', 'generic'))
+            # Get the strategy for the upsert type specified in the config, or use the scd1 strategy by default
+            strategy = self.strategy_map.get(config.get('upsert_type', 'scd1'))
 
             # Log a message indicating that the upsert operation is starting
             self.logger.info(f"Starting upsert for {config['table_name']}.")
@@ -59,8 +58,11 @@ class UpsertHandler:
             except Exception as e:  # Consider catching more specific exceptions
                 self.logger.error(f"Upsert for {config['table_name']} failed with error: {e}")
 
+        # Set thread pool size based on the number of tables and available CPUs
+        max_workers = min(len(table_configs), (os.cpu_count() or 1) * 5)
+        
         # Create a ThreadPoolExecutor and submit the upsert_table function for each table config
-        with ThreadPoolExecutor(max_workers=min(len(table_configs), (os.cpu_count() or 1) * 5)) as executor:  # Consider making the pool size configurable
+        with ThreadPoolExecutor(max_workers) as executor:  # Consider making the pool size configurable
             futures = [executor.submit(upsert_table, config) for config in table_configs]
 
             # Wait for all futures to complete
