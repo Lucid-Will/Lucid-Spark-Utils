@@ -9,4 +9,4 @@ azure-mgmt-subscription
 azure-mgmt-synapse
 azure-synapse-artifacts
 semantic-link
-pandas
+pandas==2.1

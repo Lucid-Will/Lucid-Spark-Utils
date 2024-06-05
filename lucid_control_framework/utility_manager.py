@@ -38,7 +38,7 @@ class UtilityManager:
             raise
 
     @staticmethod
-    def get_secret_value(key_vault_name, secret_name, linked_service=None, logger=None):
+    def get_secret_value_as_user(key_vault_name, secret_name, logger=None):
         """
         Retrieves a secret value from Azure Key Vault.
 
@@ -47,14 +47,55 @@ class UtilityManager:
         :param linked_service: The name of the linked service to use for secret retrieval.
         :param logger: The logger to use. If not provided, a default logger will be used.
         :return: The value of the secret retrieved from Azure Key Vault.
+
+        Example:
+        key_vault_name = "my-key-vault
+        secret_name = "my-secret"
+        secret_value = UtilityManager.get_secret_value_as_user(key_vault_name, secret_name)
         """
         
         logger = logger if logger else logging.getLogger(__name__)
 
+        # Construct the vault URL using the key_vault_name
+        key_vault_url = f"https://{key_vault_name}.vault.azure.net/"
+
         try:
             # Retrieve the secret from the key vault
-            key_vault_secret = mssparkutils.credentials.getSecret(key_vault_name, secret_name, linked_service)
-        except mssparkutils.credentials.SecretRetrievalError as e:
+            key_vault_secret = mssparkutils.credentials.getSecret(key_vault_url, secret_name)
+        except Exception as e:
+            # Log any errors that occur during the secret retrieval process
+            logger.error(f"Failed to retrieve secret from Key Vault: {e}")
+            raise
+
+        return key_vault_secret
+    
+    @staticmethod
+    def get_secret_value_as_managed_identity(key_vault_name, secret_name, managed_identity_name, logger=None):
+        """
+        Retrieves a secret value from Azure Key Vault.
+
+        :param key_vault_name: The name of the key vault.
+        :param secret_name: The name of the secret within the key vault.
+        :param managed_identity_name: The name of the managed identity resource to use for secret retrieval.
+        :param logger: The logger to use. If not provided, a default logger will be used.
+        :return: The value of the secret retrieved from Azure Key Vault.
+
+        Example:
+        key_vault_name = "my-key-vault
+        secret_name = "my-secret"
+        managed_identity_name = "my-managed-identity"
+        secret_value = UtilityManager.get_secret_value_as_managed_identity(key_vault_name, secret_name, managed_identity_name)
+        """
+        
+        logger = logger if logger else logging.getLogger(__name__)
+
+        # Construct the vault URL using the key_vault_name
+        key_vault_url = f"https://{key_vault_name}.vault.azure.net/"
+
+        try:
+            # Retrieve the secret from the key vault
+            key_vault_secret = mssparkutils.credentials.getSecret(key_vault_url, secret_name, managed_identity_name)
+        except Exception as e:
             # Log any errors that occur during the secret retrieval process
             logger.error(f"Failed to retrieve secret from Key Vault: {e}")
             raise

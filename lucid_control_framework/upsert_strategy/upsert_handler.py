@@ -1,5 +1,5 @@
-from . import UpsertFact, UpsertSCD2, UpsertSCD1
-from lucid_control_framework.dataframe_transformation_manager import DataFrameTransformationManager
+from . import UpsertFact, UpsertSCD2, UpsertSCD1, UpsertGeneric
+from lucid_control_framework.transformation_manager import TransformationManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
 import logging
@@ -19,23 +19,40 @@ class UpsertHandler:
         """
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
-        self.transform_manager = DataFrameTransformationManager(self.spark)
+        self.transform_manager = TransformationManager(self.spark, self.logger)
 
         # Create a single instance of each strategy class
         self.strategy_map = {
             'fact': UpsertFact(self.spark, self.logger, self.transform_manager),
             'scd2': UpsertSCD2(self.spark, self.logger, self.transform_manager),
-            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager)
+            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager),
+            'generic': UpsertGeneric(self.spark, self.logger, self.transform_manager)
         }
 
-    def upsert_data_concurrently(self, table_configs: List[Dict], storage_container_endpoint: Optional[str] = None, write_method: str = 'default'):
+    def upsert_data_concurrently(self, table_configs: List[Dict], storage_container_endpoint: Optional[str] = None, write_method: str = 'path'):
         """
         Performs upsert operations concurrently on multiple tables based on the provided configurations.
 
         :param table_configs: A list of table configurations.
         :param storage_container_endpoint: The storage container endpoint (optional).
-        :param write_method: The write method (default is 'default').
+        :param write_method: The write method (default is 'path').
         :param delete_unmatched: Whether to delete unmatched records (default is False).
+
+        Example:
+        table_configs = [
+            {
+                'table_name': 'table1',
+                'upsert_type': 'scd2',
+                'primary_key': ['id'],
+                'composite_columns': ['id', 'name', 'age']
+            },
+            {
+                'table_name': 'table2',
+                'upsert_type': 'scd1',
+                'primary_key': ['id'],
+                'composite_columns': ['id', 'name', 'age']
+            }
+        ]
         """
         def upsert_table(config: Dict):
             """

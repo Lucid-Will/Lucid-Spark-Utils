@@ -28,21 +28,25 @@ class DeltaTableReader:
             df = delta_table_reader.read_delta_table(table_name, storage_container_endpoint, read_method)
         """
         
-        # Read Delta table using the specified method
-        if read_method == 'default':
-            try:
-                return self.spark.read.format("delta").table(f"{table_name}")
-            except Exception as e:
-                self.logger.error(f"An error occurred in read_delta_table: {e}")
-                raise
-        elif read_method == 'abfss':
-            try:
-                return self.spark.read.format("delta").load(f"{storage_container_endpoint}/{table_name}")
-            except Exception as e:
-                self.logger.error(f"An error occurred in read_delta_table: {e}")
-                raise
-        else:
-            raise ValueError(f"Invalid method: {read_method}")
+        try:
+            # Read Delta table using the specified method
+            if read_method == 'default':
+                try:
+                    return self.spark.read.format('delta').table(f"{table_name}")
+                except Exception as e:
+                    self.logger.error(f"An error occurred in read_delta_table: {e}")
+                    raise
+            elif read_method == 'abfss':
+                try:
+                    return self.spark.read.format('delta').load(f'{storage_container_endpoint}/{table_name}')
+                except Exception as e:
+                    self.logger.error(f"An error occurred in read_delta_table: {e}")
+                    raise
+            else:
+                raise ValueError(f"Invalid method: {read_method}")
+        except Exception as e:
+            self.logger.error(f"An error occurred in read_delta_table: {e}")
+            raise
 
     def read_delta_tables_concurrently(self, table_names: List[str], storage_container_endpoint: Optional[str] = None, read_method: str = 'default') -> Dict[str, DataFrame]:
         """

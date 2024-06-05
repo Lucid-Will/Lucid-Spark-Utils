@@ -68,15 +68,15 @@ class UpsertSCD2(UpsertStrategy):
                 .withColumn("is_current", lit(True))
                 .withColumn("is_deleted", lit(False)))
     
-    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'default') -> None:
+    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'path') -> None:
         """
         Performs an upsert operation (merge) on a Delta table based on the provided configuration.
         This function supports SCD2 and auditing with specified columns.
 
         :param config: Configuration for upserting a Delta table including 'table_name', 'dataframe',
-                    'match_keys', and 'skey_column'. Expects audit columns in the dataframe.
-        :param write_method: The method to use for saving the table ('default' or 'abfss').
-        :param storage_container_endpoint: Endpoint if using 'abfss' write method.
+                    'composite_columns', and 'primary_key_column'. Expects audit columns in the dataframe.
+        :param write_method: The method to use for saving the table ('path' or 'catalog').
+        :param storage_container_endpoint: Endpoint if using 'path' write method.
 
         :return: None. The function performs an upsert operation on the Delta table.
 
@@ -87,10 +87,11 @@ class UpsertSCD2(UpsertStrategy):
             config = {
                 'table_name': 'target_table',
                 'dataframe': spark.createDataFrame([(1, "John", "Doe"), (2, "Jane", "Doe")], ["ID", "First Name", "Last Name"]),
-                'match_keys': ['ID', 'First Name'],
-                'skey_column': 'skey'
+                'composite_columns': ['ID', 'First Name'],
+                'upsert_type': 'scd2',
+                'primary_key_column': 'primary_key'
             }
-            write_method = 'default'
+            write_method = 'path'
             storage_container_endpoint = None
             upsert_delta_table(config, write_method, storage_container_endpoint)
         """
@@ -98,25 +99,25 @@ class UpsertSCD2(UpsertStrategy):
         try:
             table_name = config['table_name']
             df_source = config['dataframe']
-            match_keys = config['match_keys']
-            skey_column = config.get('skey_column')
+            composite_columns = config['composite_columns']
+            primary_key_column = config.get('primary_key_column')
 
-            # Set nkey_column to None by default
-            nkey_column = None
+            # Set composite_key_column to None by default
+            composite_key_column = None
             
-            # Assign nkey_column if match_keys provided
-            if match_keys:
-                # Set natural key column name
-                nkey_column = skey_column.replace("key", "natural_key")
+            # Assign composite_key_column if composite_columns provided
+            if composite_columns:
+                # Set composite key column name
+                composite_key_column = primary_key_column.replace("key", "composite_key")
 
         except KeyError as e:
-            raise ValueError(f"Configuration must include 'table_name', 'dataframe', 'match_keys', and 'skey_column': {str(e)}'")
+            raise ValueError(f"Configuration must include 'table_name', 'dataframe', 'composite_columns', and 'primary_key_column': {str(e)}'")
 
         try:
             # Generate keys using the unified transformation method
             if self.transformer:
                 # Stage the dataframe with keys
-                df_source = self.transformer.stage_dataframe_with_keys(table_name, df_source, df_source.columns, skey_column, nkey_column, match_keys)
+                df_source = self.transformer.stage_dataframe_with_keys(storage_container_endpoint, table_name, df_source, primary_key_column, composite_key_column, composite_columns)
         except Exception as e:
             self.logger.error(f"Failed to generate keys for table {table_name}: {e}")
             raise
@@ -151,15 +152,15 @@ class UpsertSCD2(UpsertStrategy):
 
             # Write the dataframe to the Delta table
             try:
-                if write_method == 'abfss':
+                if write_method == 'path':
                     # Check for storage container endpoint
                     if not storage_container_endpoint:
-                        raise ValueError("Storage container endpoint must be provided when using 'abfss' write method.")
-                    df_source.write.format('delta').mode('overwrite').save(f'abfss://{storage_container_endpoint}/Tables/{table_name}')
-                elif write_method == 'default':
+                        raise ValueError("Storage container endpoint must be provided when using 'path' write method.")
+                    df_source.write.format('delta').mode('overwrite').save(f'{storage_container_endpoint}/Tables/{table_name}')
+                elif write_method == 'catalog':
                     df_source.write.format('delta').mode('overwrite').saveAsTable(table_name)
                 else:
-                    raise ValueError("Invalid write method provided. Use 'default' or 'abfss'.")
+                    raise ValueError("Invalid write method provided. Use 'path' or 'catalog'.")
             except Exception as e:
                 self.logger.info(f'Writing of initial load for table {table_name} failed with error: {str(e)}')
                 raise
@@ -170,9 +171,9 @@ class UpsertSCD2(UpsertStrategy):
         # Generate field exclusions for the merge operation
         try:
             # Exclude key columns from change detection
-            key_columns = [skey_column, nkey_column]
+            key_columns = [primary_key_column, composite_key_column]
             audit_columns = ['inserted_date_time', 'updated_date_time', 'effective_from_date_time', 'effective_to_date_time', 'is_current', 'is_deleted']
-            exclude_columns = match_keys + key_columns + audit_columns
+            exclude_columns = composite_columns + key_columns + audit_columns
 
             # Get columns for change detection
             change_detection_columns = [col for col in df_source.columns if col not in exclude_columns]
@@ -186,9 +187,9 @@ class UpsertSCD2(UpsertStrategy):
         target_view_name = f'{temp_table_name}_target'
         
         # Create merge conditions
-        match_condition = ' AND '.join([f'target.{col} = source.{col}' for col in match_keys]) + ' AND target.is_current = true'
+        match_condition = ' AND '.join([f'target.{col} = source.{col}' for col in composite_columns]) + ' AND target.is_current = true'
         update_condition = ' OR '.join([f'target.{col} != source.{col}' for col in change_detection_columns])
-        insert_condition = " AND ".join([f"source.{key} = target.{key}" for key in match_keys])
+        insert_condition = " AND ".join([f"source.{key} = target.{key}" for key in composite_columns])
         
         # Convert DeltaTable to DataFrame and register both DataFrames as temporary views with unique names
         df_source.createOrReplaceTempView(source_view_name)

@@ -14,7 +14,7 @@ Note: The underlying modules are not directly accessible when importing this pac
 
 from .utils import LucidUtils
 
-# Create an instance of LucidUtils
+# Instantiate Lucid Classes
 lucid = LucidUtils()
 
 # Expose the instance of LucidUtils at the top level

@@ -10,21 +10,21 @@ class UpsertFact(UpsertStrategy):
     The `upsert_to_table` method performs an upsert operation on a Delta fact table based on the provided configuration.
     """
 
-    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'default') -> None:
+    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'path') -> None:
         """
         Performs an upsert operation on a Delta fact table based on the provided configuration.
 
         :param config: Configuration for upserting a fact table including 'table_name', 'dataframe',
-                    'match_keys' and 'skey_column'. Assumes audit columns are relevant but less complex.
-        :param write_method: The method to use for saving the table ('default' or 'abfss').
-        :param storage_container_endpoint: Endpoint if using 'abfss' write method.
+                    'composite_columns' and 'primary_key_column'. Assumes audit columns are relevant but less complex.
+        :param write_method: The method to use for saving the table ('path' or 'catalog').
+        :param storage_container_endpoint: Endpoint if using 'path' write method.
         """
         # Ensure config contains the necessary keys
         try:
             table_name = config['table_name']
             df_source = config['dataframe']
-            match_keys = config['match_keys']
-            skey_column = config['skey_column']
+            composite_columns = config['composite_columns']
+            primary_key_column = config['primary_key_column']
         except KeyError as e:
             self.logger.error(f"Config is missing necessary key: {str(e)}")
             raise
@@ -32,21 +32,21 @@ class UpsertFact(UpsertStrategy):
         current_ts = current_timestamp()
 
         try:
-            # Set nkey_column to None by default
-            nkey_column = None
+            # Set composite_column to None by default
+            composite_key_column = None
             
-            # Assign nkey_column if match_keys provided
-            if match_keys:
-                # Set natural key column name
-                nkey_column = skey_column.replace("key", "natural_key")
+            # Assign composite_key_column if composite_columns provided
+            if composite_columns:
+                # Set composite key column name
+                composite_key_column = primary_key_column.replace("key", "composite_key")
         except Exception as e:
-            raise ValueError(f"Natural key column could not be generated: {str(e)}")
+            raise ValueError(f"Composite key column could not be generated: {str(e)}")
 
         try:
             # Generate keys using the transformation method
             if self.transformer:
                 # Stage the dataframe with keys
-                df_source = self.transformer.stage_dataframe_with_keys(table_name, df_source, df_source.columns, skey_column, nkey_column, match_keys)
+                df_source = self.transformer.stage_dataframe_with_keys(storage_container_endpoint, table_name, df_source, primary_key_column, composite_key_column, composite_columns)
         except Exception as e:
             self.logger.error(f"Failed to generate keys for table {table_name}: {e}")
             raise
@@ -64,15 +64,15 @@ class UpsertFact(UpsertStrategy):
 
             # Write the dataframe to the Delta table
             try:
-                if write_method == 'abfss':
+                if write_method == 'path':
                     # Check for storage container endpoint
                     if not storage_container_endpoint:
-                        raise ValueError("Storage container endpoint must be provided when using 'abfss' write method.")
-                    df_source.write.format('delta').save(f'abfss://{storage_container_endpoint}/Tables/{table_name}')
-                elif write_method == 'default':
+                        raise ValueError("Storage container endpoint must be provided when using 'path' write method.")
+                    df_source.write.format('delta').mode('overwrite').save(f'{storage_container_endpoint}/Tables/{table_name}')
+                elif write_method == 'catalog':
                     df_source.write.format('delta').saveAsTable(table_name)
                 else:
-                    raise ValueError("Invalid write method provided. Use 'default' or 'abfss'.")
+                    raise ValueError("Invalid write method provided. Use 'path' or 'catalog'.")
             except Exception as e:
                 self.logger.info(f'Writing of initial load for table {table_name} failed with error: {str(e)}')
                 raise
@@ -81,18 +81,18 @@ class UpsertFact(UpsertStrategy):
             return
 
         # Define match condition for the MERGE operation
-        match_condition = " AND ".join([f"target.{k} = source.{k}" for k in match_keys])
+        match_condition = " AND ".join([f"target.{k} = source.{k}" for k in composite_columns])
         
         # Exclude key columns from change detection
-        key_columns = [skey_column, nkey_column]
+        key_columns = [primary_key_column, composite_key_column]
         audit_columns = ['inserted_date_time', 'updated_date_time']
-        exclude_columns = match_keys + key_columns + audit_columns
+        exclude_columns = composite_columns + key_columns + audit_columns
 
         # Get non-match key fields excluding audit fields
-        non_match_keys = [col for col in df_source.columns if col not in exclude_columns]
+        non_composite_columns = [col for col in df_source.columns if col not in exclude_columns]
         
         # Create a condition to check if any non-match key field has changed
-        update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_match_keys])
+        update_condition = " OR ".join([f"target.{field} <> source.{field}" for field in non_composite_columns])
         
         # Configure the merge operation to update existing records and insert new records
         merge_operation = deltaTable.alias("target") \
@@ -101,7 +101,7 @@ class UpsertFact(UpsertStrategy):
         # Configure the merge operation to update existing records and insert new records
         merge_operation = merge_operation.whenMatchedUpdate(
             condition=update_condition,
-            set={field: f"source.{field}" for field in non_match_keys} | {"updated_date_time": "source.updated_date_time"}) \
+            set={field: f"source.{field}" for field in non_composite_columns} | {"updated_date_time": "source.updated_date_time"}) \
             .whenNotMatchedInsertAll()
 
         # Execute the merge operation

@@ -1,9 +1,9 @@
-from lucid_control_framework.dataframe_transformation_manager import DataFrameTransformationManager
+from lucid_control_framework.transformation_manager import TransformationManager
 from .utility_manager import UtilityManager
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, FloatType
-from pyspark.sql.functions import concat, abs, hash, col
 from datetime import datetime
 from pyspark.sql import Row
+from typing import Dict
 import requests
 import logging
 import time
@@ -24,9 +24,9 @@ class SemanticModelManager:
         """
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
-        self.transform_manager = DataFrameTransformationManager(self.spark)
+        self.transform_manager = TransformationManager(self.spark, self.logger)
 
-    def get_service_principal_pbi_scope_token(self, tenant_id, key_vault_name, client_id, client_secret, linked_service):
+    def get_service_principal_pbi_scope_token(self, tenant_id: str, key_vault_name: str, client_id: str, client_secret: str, managed_identity: str) -> str:
         """
         Retrieves an access token for a service principal using the Microsoft Authentication Library (MSAL).
 
@@ -34,13 +34,16 @@ class SemanticModelManager:
         :param key_vault_name: The name of the Azure Key Vault containing the client ID and client secret.
         :param client_id: The name of the secret containing the client ID in Azure Key Vault.
         :param client_secret: The name of the secret containing the client secret in Azure Key Vault.
-        :param linked_service: The name of the linked service to use for secret retrieval.
+        :param managed_identity: The name of the linked service to use for secret retrieval.
         :return: The access token for the service principal.
+
+        Example:
+        get_secret_value_as_managed_identity("my-key-vault", "my-client-id", "my-managed-identity")
         """
         try:
             # Retrieve the client ID and client secret from Azure Key Vault
-            client_id = UtilityManager.get_secret_value(key_vault_name, client_id, linked_service)
-            client_secret = UtilityManager.get_secret_value(key_vault_name, client_secret, linked_service)
+            client_id = UtilityManager.get_secret_value_as_managed_identity(key_vault_name, client_id, managed_identity)
+            client_secret = UtilityManager.get_secret_value_as_managed_identity(key_vault_name, client_secret, managed_identity)
 
             # Create a confidential client application using MSAL
             app = msal.ConfidentialClientApplication(
@@ -59,7 +62,7 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in get_service_principal_token: {e}")
             raise
     
-    def trigger_semantic_model_refresh(self, workspace_id, semantic_model_id, refresh_token):
+    def trigger_semantic_model_refresh(self, workspace_id: str, semantic_model_id: str, refresh_token: str) -> None:
         """
         Triggers a refresh of a Power BI dataset.
 
@@ -67,6 +70,9 @@ class SemanticModelManager:
         :param semantic_model_id: The ID of the dataset to refresh.
         :param refresh_token: The refresh token for authentication.
         :return: True if the refresh was successful, False otherwise.
+
+        Example:
+        trigger_dataset_refresh("my-workspace-id", "my-dataset-id", "my-refresh-token")
         """
         try:
             # Construct the API endpoint URL
@@ -91,7 +97,7 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in trigger_dataset_refresh: {e}")
             raise
     
-    def get_semantic_model_refresh_status(self, workspace_id, semantic_model_id, refresh_token):
+    def trigger_semantic_model_refresh(self, workspace_id: str, semantic_model_id: str, refresh_token: str) -> None:
         """
         Retrieves the refresh status of a Power BI dataset.
 
@@ -99,6 +105,9 @@ class SemanticModelManager:
         :param semantic_model_id: The ID of the dataset to refresh.
         :param refresh_token: The refresh token for authentication.
         :return: The refresh status of the dataset.
+
+        Example:
+        get_dataset_refresh_status("my-workspace-id", "my-dataset-id", "my-refresh-token")
         """
         try:
             # Construct the API endpoint URL
@@ -117,7 +126,7 @@ class SemanticModelManager:
                 response_json = json.loads(response.text)
                 refreshes = response_json["value"]
                 if refreshes[0]["status"] == "Unknown" or refreshes[0]["status"] == "InProgress":
-                    time.sleep(15)
+                    time.sleep(60)
                     if time.time() - start_time > 1200:
                         break
                 else:
@@ -167,24 +176,29 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in get_semantic_model_refresh_status: {e}")
             raise    
 
-    def log_semantic_model_refresh_activity(self, refresh_state):
+    def log_semantic_model_refresh_activity(self, log_table_storage_container_endpoint: str, log_table_name: str, refresh_state: Dict) -> None:
         """
         Logs the refresh activity of a Power BI dataset.
 
+        :param log_table_storage_container_endpoint: The endpoint of the Azure Storage container where the log table is stored.
+        :param log_table_name: The name of the log table in the Azure Storage container.
         :param refresh_state: The refresh state of the dataset.
+
+        Example:
+        log_dataset_refresh_activity(refresh_state)
         """
         try:
-            # Set match_keys for the log DataFrame using workspace_id and semantic_model_id from the refresh_state dataframe
-            match_keys = refresh_state.select(concat(col("workspace_id"), col("semantic_model_id")))
+            # Set composite_columns
+            composite_columns = ['workspace_id', 'semantic_model_id']
 
-            # Set target table
-            target_table = 'Control.semantic_model_refresh_log'
+            # Set target table path
+            target_table_path = f"{log_table_storage_container_endpoint}/Tables/{log_table_name}"
             
             # Add key to the log DataFrame using transform manager
-            df = self.transform_manager.stage_dataframe_with_keys(target_table, refresh_state, refresh_state.columns, 'semantic_model_refresh_key', 'semantic_model_refresh_natural_key', match_keys)
+            df = self.transform_manager.stage_dataframe_with_keys(log_table_storage_container_endpoint, log_table_name, refresh_state, 'semantic_model_refresh_key', 'semantic_model_refresh_natural_key', composite_columns)
             
             # Write the refresh state to delta table
-            df.write.format("delta").mode("append").saveAsTable(target_table)
+            df.write.format("delta").mode("append").save(target_table_path)
             self.logger.info("Refresh state logged successfully.")
         except Exception as e:
             self.logger.error(f"An unexpected error occurred in log_semantic_model_refresh_activity: {e}")
