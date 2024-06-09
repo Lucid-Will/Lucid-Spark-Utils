@@ -8,7 +8,7 @@ class UpsertStrategy(ABC):
     This class should be subclassed by any class that implements a specific upsert strategy.
     """
 
-    def __init__(self, spark, logger: 'Logger', transform_manager: Optional['TransformManager'] = None):
+    def __init__(self, spark, logger: 'Logger', table_manager: "DeltaTableManager",  transform_manager: Optional['TransformManager'] = None):
         """
         Initialize the UpsertStrategy.
 
@@ -19,9 +19,10 @@ class UpsertStrategy(ABC):
         self.spark = spark
         self.logger = logger
         self.transformer = transform_manager
+        self.table_manager = table_manager
 
     @abstractmethod
-    def upsert_to_table(self, config: dict, storage_container_endpoint: Optional[str] = None, write_method: str = 'path') -> None:
+    def upsert_to_table(self, config: dict, storage_container_endpoint: Optional[str] = None, write_method: str = 'catalog') -> None:
         """
         Upsert data to a table.
 
@@ -29,7 +30,7 @@ class UpsertStrategy(ABC):
 
         :param config: The configuration dictionary.
         :param storage_container_endpoint: The storage container endpoint. Default is None.
-        :param write_method: The write method. Default is 'path'.
+        :param write_method: The write method. Default is 'catalog'. Options are 'catalog' and 'path'.
         :raises NotImplementedError: If the method is not overridden by a subclass.
         """
         raise NotImplementedError("Subclass must implement abstract method")

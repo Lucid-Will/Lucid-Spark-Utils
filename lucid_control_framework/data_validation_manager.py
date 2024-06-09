@@ -1,4 +1,5 @@
 from lucid_control_framework.transformation_manager import TransformationManager
+from lucid_control_framework.delta_table_manager import DeltaTableManager
 from pyspark.sql.functions import lit, col, when, concat_ws, abs, hash
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, TimestampType
 from pyspark.sql.functions import current_timestamp
@@ -23,15 +24,32 @@ class Validation:
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
         self.transform_manager = TransformationManager(self.spark, self.logger)
+        self.table_manager = DeltaTableManager(self.spark, self.logger)
 
-    def log_table_validation(self, target_storage_container_endpoint: str, target_table_name: str, log_storage_container_endpoint: str, log_table_name: str, primary_key_column: Optional[str] = None, stage_count: Optional[int] = None, invalid_count: Optional[int] = None, duplicate_count: Optional[int] = None, delete_count: Optional[int] = None) -> None:
+    def log_table_validation(
+            self,
+            target_table_name: str,
+            log_table_name: str,
+            read_method: str = 'catalog',
+            write_method: str = 'catalog',
+            target_storage_container_endpoint: Optional[str] = None,
+            log_storage_container_endpoint: Optional[str] = None,
+            primary_key_column: Optional[str] = None,
+            stage_count: Optional[int] = None,
+            invalid_count: Optional[int] = None,
+            duplicate_count: Optional[int] = None,
+            delete_count: Optional[int] = None
+        ) -> None:
         """
         Log the validation results for a table.
 
-        :param target_storage_container_endpoint: The storage container endpoint of the target table
+        
         :param target_table_name: The name of the target table
-        :param log_storage_container_endpoint: The storage container endpoint of the log table
         :param log_table_name: The name of the log table
+        :param read_method: The method used to read the target table (catalog or path)
+        :param write_method: The method used to write the log table (catalog or path)
+        :param target_storage_container_endpoint: The storage container endpoint of the target table
+        :param log_storage_container_endpoint: The storage container endpoint of the log table
         :param primary_key_column: The primary key column used for filtering
         :param stage_count: The count of rows in the staging DataFrame
         :param invalid_count: Count of invalid records
@@ -42,16 +60,12 @@ class Validation:
         log_table_validation("storage_container_endpoint", "my_table", "log_storage_container_endpoint", "log_table", "id", 100, 5, 10, 3)
         """
         try:
-            # Construct the base paths of the target and log tables
-            target_table_path = f'{target_storage_container_endpoint}/Tables/{target_table_name}'
-            log_table_path = f'{log_storage_container_endpoint}/Tables/{log_table_name}'
-
             # Determine if the 'is_current' column exists in the target table for count validation
-            table_schema = self.spark.read.format('delta').load(target_table_path).schema
+            table_schema = self.table_manager.read_delta_table(target_table_name, target_storage_container_endpoint, read_method).schema
             columns = [field.name for field in table_schema]
             
             # Set target records
-            target_records = self.spark.read.format('delta').load(target_table_path)
+            target_records = self.table_manager.read_delta_table(target_table_name, target_storage_container_endpoint, read_method)
             
             # Filter current records
             if 'is_current' in columns:
@@ -89,13 +103,22 @@ class Validation:
 
             # Attempt to access the Delta table
             try:
-                self.spark.read.format('delta').load(log_table_path)
+                DeltaTable.forName(self.spark, log_table_name)
             except Exception as e:
                 self.logger.info('Table does not exist, creating it.')
 
+                # Construct log table path
+                if write_method == 'catalog':
+                    create_table = f'CREATE TABLE {log_table_name}'
+                elif write_method == 'path':
+                    log_table_path = f'{log_storage_container_endpoint}/Tables/{log_table_name}'
+                    create_table = f'CREATE TABLE delta.`{log_table_path}`'
+                else:
+                    raise ValueError(f'Invalid write method: {write_method}')
+                    
                 # Create logging table
                 self.spark.sql(f"""
-                    CREATE TABLE delta.`{log_table_path}` (
+                    {create_table} (
                         validation_key BIGINT,
                         table_name VARCHAR(150),
                         stage_count INT,
@@ -121,22 +144,43 @@ class Validation:
             ).select(primary_key_column, *columns)
 
             # Write to log table
-            df_validation.write.format("delta").mode("append").option('mergeSchema', 'true').save(log_table_path)
+            self.table_manager.write_delta_table(
+                df_validation, 
+                log_table_name, 
+                log_storage_container_endpoint, 
+                write_method, 
+                'append', 
+                'true'
+            )
 
             self.logger.info(f"Validation log for table {target_table_name} has been successfully created.")
         except Exception as e:
             self.logger.error(f"Failed to create validation log for table {target_table_name}. Error: {str(e)}")
             raise e
         
-    def data_validation_check(self, df_stage: DataFrame, storage_container_endpoint: str, target_table: str, composite_columns: List[str], primary_key_column: Optional[str] = None, dropped_validation_columns: Optional[List[str]] = None) -> None:
+    def data_validation_check(
+            self, 
+            df_stage: DataFrame, 
+            target_table_name: str,
+            target_storage_container_endpoint: str,
+            composite_columns: List[str], 
+            read_method: str = 'catalog',
+            write_method: str = 'catalog',
+            primary_key_column: Optional[str] = None, 
+            dropped_validation_columns: Optional[List[str]] = None
+        ) -> None:
+        
         """
         Identify invalid, duplicate, and delete flagged records by identifying them,
         saving them to specified paths, and returning a filtered DataFrame along with counts of invalid, duplicate, and delete flagged records.
 
         :param df_stage: The staging DataFrame
-        :param storage_container_endpoint: The endpoint for the storage account
-        :param target_table: The name of the table being processed and the target table to check for delete flagged records
+        :param target_table_name: The name of the table being processed and the target table to check for delete flagged records
+        :param target_storage_container_endpoint: The endpoint for the storage account
         :param composite_columns: List of columns to check for invalid values and duplicates and form the composite key
+        :param read_method: The method used to read the target table (catalog or path)
+        :param write_method: The method used to write the log table (catalog or path)
+        :param primary_key_column: The primary key column used for identifying records in the target table
         :param dropped_validation_columns: List of columns to drop from the final DataFrame after validation
         :return: A tuple containing the filtered DataFrame, count of invalid records, count of duplicate records, and count of delete flagged records
 
@@ -154,7 +198,7 @@ class Validation:
             timestamp = now.strftime('%H%M%S')
 
             # Define paths
-            base_path = f'{storage_container_endpoint}/Files/Data_Validation/{target_table}/{year}/{month}/{day}'
+            base_path = f'{target_storage_container_endpoint}/Files/Data_Validation/{target_table_name}/{year}/{month}/{day}'
             invalid_records_path = f'{base_path}/invalid_records/{timestamp}.csv'
             duplicate_records_path = f'{base_path}/duplicate_records/{timestamp}.csv'
             delete_records_path = f'{base_path}/delete_flagged_records/{timestamp}.csv'
@@ -241,13 +285,14 @@ class Validation:
             # Set delete records DataFrame to None
             delete_records_count = 0
 
-            # Set target table path
-            table_path = f'{storage_container_endpoint}/Tables/{target_table}'
-            
             # If target table doesn't exist skip delete flagged records handling
             try:
                 # Identify records in the target table that are flagged for deletion
-                df_target = DeltaTable.forPath(self.spark, table_path).toDF()
+                df_target = self.table_manager.read_delta_table(
+                    target_table_name, 
+                    target_storage_container_endpoint, 
+                    read_method
+                )
 
                 # Filter out unknown records
                 if primary_key_column:
@@ -284,7 +329,7 @@ class Validation:
                     # Re-enable Arrow for further processing
                     self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
             except Exception as e:
-                self.logger.info(f"Target table {target_table} does not exist. Skipping delete flagged records handling.")
+                self.logger.info(f"Target table {target_table_name} does not exist. Skipping delete flagged records handling.")
                 delete_records = None
 
             # Add record_type column to all validation DataFrames
@@ -304,11 +349,18 @@ class Validation:
                         df_combined = df_combined.unionByName(df, allowMissingColumns=True)
 
             # Extract the base name of the target table without the schema
-            validation_target_table = f'validation_{target_table}'
+            validation_target_table = f'validation_{target_table_name}'
 
             # Write combined validation DataFrames to a Delta table
             if df_combined is not None:
-                df_combined.write.format('delta').mode('overwrite').option('overwriteSchema', 'true').save(f'{storage_container_endpoint}/Tables/{validation_target_table}')
+                self.table_manager.write_delta_table(
+                    df_combined, 
+                    validation_target_table, 
+                    target_storage_container_endpoint, 
+                    write_method, 
+                    'overwrite', 
+                    'true'
+                )
 
             # Drop the specified validation columns from the final DataFrame
             if dropped_validation_columns:
@@ -321,22 +373,27 @@ class Validation:
             self.logger.error(f'Failed to handle invalid, duplicate, and delete flagged records. Error: {str(e)}')
             raise e
     
-    def hard_delete_records(self, target_table_storage_container_endpoint: str, target_table_name: str, primary_key_column, df_delete=None):
+    def hard_delete_records(
+            self,
+            target_table_name: str,
+            primary_key_column: str,
+            write_method: str = 'catalog',
+            target_table_storage_container_endpoint: Optional[str] = None,
+            df_delete=None
+        ):
         """
         Perform hard deletes from the target table for records identified as delete flagged.
 
-        :param target_table_storage_container_endpoint: The storage container endpoint of the target table
         :param target_table_name: The name of the target table
         :param primary_key_column: The primary key column used for identifying records in the target table
+        :param write_method: The method used to write the log table (catalog or path)
+        :param target_table_storage_container_endpoint: The storage container endpoint of the target table
         :param df_delete: DataFrame of records flagged for deletion
 
         Example:
-        hard_delete_records("target_table_storage_container_endpoint", "my_table", "id", df_delete)
+        hard_delete_records('schema.my_table', 'id', 'path', 'target_table_storage_container_endpoint', df_delete)
         """
         try:
-            # Construct the absolute path of the target table
-            target_table_path = f'{target_table_storage_container_endpoint}/Tables/{target_table_name}'
-
             # Check if df_delete is None or empty
             if df_delete is None or df_delete.count() == 0:
                 self.logger.info("No records flagged for deletion. Skipping hard delete.")
@@ -349,15 +406,32 @@ class Validation:
             # Perform hard delete on target table based on primary keys
             condition = " OR ".join([f"{primary_key_column} = '{key}'" for key in delete_keys])
 
-            # Build and execute the delete statement
-            self.spark.sql(f"DELETE FROM delta.`{target_table_path}` WHERE {condition}")
+            # Construct log table path
+            if write_method == 'catalog':
+                # Build and execute the delete statement
+                self.spark.sql(f"DELETE FROM {target_table_name}` WHERE {condition}")
+            elif write_method == 'path':
+                # Construct the absolute path of the target table
+                target_table_path = f'{target_table_storage_container_endpoint}/Tables/{target_table_name}'
+                
+                # Build and execute the delete statement
+                self.spark.sql(f"DELETE FROM delta.`{target_table_path}` WHERE {condition}")
+            else:
+                raise ValueError(f'Invalid write method: {write_method}')
 
             self.logger.info(f"Successfully performed hard deletes on {target_table_name} for records flagged as delete.")
         except Exception as e:
             self.logger.error(f"Failed to perform hard deletes on {target_table_name}. Error: {str(e)}")
             raise e
         
-    def soft_delete_records(self, target_table_storage_container_endpoint: str, target_table_name: str, primary_key_column, df_delete=None):
+    def soft_delete_records(
+            self,
+            target_table_name: str,
+            primary_key_column: str,
+            read_method: str = 'catalog',
+            target_table_storage_container_endpoint: Optional[str] = None,
+            df_delete=None
+            ):
         """
         Perform soft deletes from the target table for records identified as delete flagged by setting the is_deleted column to True.
         If the is_deleted column does not exist, it will be added to the target table.
@@ -371,9 +445,6 @@ class Validation:
         soft_delete_records("storage_container_endpoint", "my_table", "id", df_delete)
         """
         try:
-            # Construct the absolute path of the target table
-            target_table_path = f'{target_table_storage_container_endpoint}/Tables/{target_table_name}'
-
             # Check if df_delete is None or empty
             if df_delete is None or df_delete.count() == 0:
                 self.logger.info("No records flagged for deletion. Skipping soft delete.")
@@ -384,7 +455,11 @@ class Validation:
             delete_keys = [row[primary_key_column] for row in delete_keys]
 
             # Perform soft delete on target table based on primary keys
-            delta_table = self.spark.read.format('delta').load(target_table_path)
+            delta_table = self.table_manager.read_delta_table(
+                target_table_name, 
+                target_table_storage_container_endpoint, 
+                read_method
+            )
 
             # Check if the is_deleted column exists
             if 'is_deleted' not in delta_table.columns:

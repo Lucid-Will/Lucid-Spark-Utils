@@ -1,9 +1,10 @@
 from lucid_control_framework.transformation_manager import TransformationManager
+from lucid_control_framework.delta_table_manager import DeltaTableManager
 from .utility_manager import UtilityManager
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, FloatType
 from datetime import datetime
 from pyspark.sql import Row
-from typing import Dict
+from typing import Dict, Optional
 import requests
 import logging
 import time
@@ -25,8 +26,15 @@ class SemanticModelManager:
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
         self.transform_manager = TransformationManager(self.spark, self.logger)
+        self.table_manager = DeltaTableManager(self.spark, self.logger)
 
-    def get_service_principal_pbi_scope_token(self, tenant_id: str, key_vault_name: str, client_id: str, client_secret: str, managed_identity: str) -> str:
+    def get_service_principal_pbi_scope_token(
+            self, tenant_id: str,
+            key_vault_name: str,
+            client_id: str,
+            client_secret: str,
+            managed_identity: str
+        ) -> str:
         """
         Retrieves an access token for a service principal using the Microsoft Authentication Library (MSAL).
 
@@ -62,7 +70,11 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in get_service_principal_token: {e}")
             raise
     
-    def trigger_semantic_model_refresh(self, workspace_id: str, semantic_model_id: str, refresh_token: str) -> None:
+    def trigger_semantic_model_refresh(
+            self, workspace_id: str,
+            semantic_model_id: str,
+            refresh_token: str
+        ) -> None:
         """
         Triggers a refresh of a Power BI dataset.
 
@@ -97,7 +109,11 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in trigger_dataset_refresh: {e}")
             raise
     
-    def trigger_semantic_model_refresh(self, workspace_id: str, semantic_model_id: str, refresh_token: str) -> None:
+    def get_semantic_model_refresh_status(
+            self, workspace_id: str,
+            semantic_model_id: str,
+            refresh_token: str
+        ) -> None:
         """
         Retrieves the refresh status of a Power BI dataset.
 
@@ -176,13 +192,20 @@ class SemanticModelManager:
             self.logger.error(f"An unexpected error occurred in get_semantic_model_refresh_status: {e}")
             raise    
 
-    def log_semantic_model_refresh_activity(self, log_table_storage_container_endpoint: str, log_table_name: str, refresh_state: Dict) -> None:
+    def log_semantic_model_refresh_activity(
+            self,
+            log_table_name: str,
+            refresh_state: Dict,
+            write_method: str = 'catalog',
+            log_table_storage_container_endpoint: Optional[str] = None,
+        ) -> None:
         """
         Logs the refresh activity of a Power BI dataset.
 
-        :param log_table_storage_container_endpoint: The endpoint of the Azure Storage container where the log table is stored.
         :param log_table_name: The name of the log table in the Azure Storage container.
         :param refresh_state: The refresh state of the dataset.
+        :param write_method: The method to use for writing the log table. Can be either 'path' or 'catalog'. Default is 'catalog'.
+        :param log_table_storage_container_endpoint: The endpoint of the Azure Storage container where the log table is stored.
 
         Example:
         log_dataset_refresh_activity(refresh_state)
@@ -191,14 +214,25 @@ class SemanticModelManager:
             # Set composite_columns
             composite_columns = ['workspace_id', 'semantic_model_id']
 
-            # Set target table path
-            target_table_path = f"{log_table_storage_container_endpoint}/Tables/{log_table_name}"
-            
             # Add key to the log DataFrame using transform manager
-            df = self.transform_manager.stage_dataframe_with_keys(log_table_storage_container_endpoint, log_table_name, refresh_state, 'semantic_model_refresh_key', 'semantic_model_refresh_natural_key', composite_columns)
+            df = self.transform_manager.stage_dataframe_with_keys(
+                log_table_storage_container_endpoint,
+                log_table_name, refresh_state,
+                'semantic_model_refresh_key',
+                'semantic_model_refresh_natural_key',
+                composite_columns,
+                match_key_columns=None,
+                read_method='catalog'
+            )
             
             # Write the refresh state to delta table
-            df.write.format("delta").mode("append").save(target_table_path)
+            self.table_manager.write_delta_table(
+                df, 
+                log_table_name, 
+                log_table_storage_container_endpoint, 
+                write_method, 
+                'append'
+            )
             self.logger.info("Refresh state logged successfully.")
         except Exception as e:
             self.logger.error(f"An unexpected error occurred in log_semantic_model_refresh_activity: {e}")

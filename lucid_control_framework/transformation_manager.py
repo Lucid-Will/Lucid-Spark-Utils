@@ -1,3 +1,4 @@
+from lucid_control_framework.delta_table_manager import DeltaTableManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql.functions import concat_ws, abs, hash, row_number, lit
 from pyspark.sql import DataFrame
@@ -12,19 +13,30 @@ class TransformationManager:
         
         self.logger = logger if logger else logging.getLogger(__name__)
         self.spark = spark
+        self.table_manager = DeltaTableManager(spark, logger)
 
-    def stage_dataframe_with_keys(self, target_table_storage_container_endpoint: str, target_table: str, dataframe: DataFrame, primary_key_column: Optional[str] = None, composite_key_column: Optional[str] = None, match_key_columns: Optional[List[str]] = None) -> Optional[DataFrame]:
+    def stage_dataframe_with_keys(
+        self, 
+        target_table: str, 
+        dataframe: DataFrame, 
+        primary_key_column: Optional[str] = None, 
+        composite_key_column: Optional[str] = None, 
+        match_key_columns: Optional[List[str]] = None, 
+        read_method: str = 'catalog',
+        target_table_storage_container_endpoint: Optional[str] = None 
+    ) -> Optional[DataFrame]:
         """
         Transforms a DataFrame by adding a new column with an integer hash based on specified key columns.
         It also adds a surrogate key column with values starting from the maximum key in the target table plus one.
 
-        :param target_table_storage_container_endpoint: The storage container endpoint for the target table.
         :param target_table: The target table to check for the maximum key.
         :param dataframe: The source DataFrame.
         :param columns: List of column names to include in the transformation.
         :param primary_key_column: The name of the new surrogate key column to be added.
         :param composite_key_column: The name of the new natural key column to be added.
         :param match_key_columns: List of columns to use for hash generation.
+        :param read_method: The method to use for reading the target table. Can be either 'path' or 'catalog'.
+        :param target_table_storage_container_endpoint: The storage container endpoint for the target table.
 
         :return: Transformed DataFrame with the new columns added, if specified.
 
@@ -33,9 +45,6 @@ class TransformationManager:
             df_transformed = stage_dataframe_with_keys("target_table", df, ["ID", "First Name"], "skey", "nkey", ["ID", "First Name"])
         """
         try:
-            # Set the target table path
-            target_table_path = f"{target_table_storage_container_endpoint}/Tables/{target_table}"
-            
             # Get the column names from the dataframe
             columns = dataframe.columns
             
@@ -56,10 +65,21 @@ class TransformationManager:
             
             # Attempt to access the Delta table
             try:
-                DeltaTable.forPath(self.spark, target_table_path)
+                if read_method == 'catalog':
+                    DeltaTable.forName(self.spark, target_table)
+                elif read_method == 'path':
+                    target_table_path = f"{target_table_storage_container_endpoint}/Tables/{target_table}"
+                    DeltaTable.forPath(self.spark, target_table_path)
+                else:
+                    raise ValueError(f'Invalid method: {read_method}')
 
                 # If table exists retrieve max key
-                max_key = self.spark.sql(f"SELECT MAX({primary_key_column}) FROM delta.`{target_table_path}`").first()[0]
+                if read_method == 'catalog':
+                    max_key = self.spark.sql(f"SELECT MAX({primary_key_column}) FROM {target_table}").first()[0]
+                elif read_method == 'path':
+                    max_key = self.spark.sql(f"SELECT MAX({primary_key_column}) FROM delta.`{target_table_path}`").first()[0]
+                else:
+                    raise ValueError(f'Invalid method: {read_method}')
 
                 # If table isn't empty use max key value
                 if max_key is not None:
@@ -81,7 +101,10 @@ class TransformationManager:
             self.logger.error(f"An error occurred while transforming the dataframe with columns {columns}, match_key_columns {match_key_columns}, and new column {primary_key_column}: {e}")
             return None
 
-    def execute_transformations_concurrently(self, transformations: List[Tuple[Callable, Tuple]]) -> List:
+    def execute_transformations_concurrently(
+            self,
+            transformations: List[Tuple[Callable, Tuple]]
+    ) -> List:
         """
         Executes multiple DataFrame transformation tasks concurrently, improving performance on multi-core systems.
 

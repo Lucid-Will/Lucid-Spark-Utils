@@ -1,5 +1,6 @@
 from . import UpsertFact, UpsertSCD2, UpsertSCD1, UpsertGeneric
 from lucid_control_framework.transformation_manager import TransformationManager
+from lucid_control_framework.delta_table_manager import DeltaTableManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
 import logging
@@ -12,7 +13,7 @@ class UpsertHandler:
 
     def __init__(self, spark, logger=None):
         """
-        Initializes the handler with a Spark session, a logger, and an optional transform manager.
+        Initializes the handler with a Spark session, a logger, a file manager, and an optional transform manager.
 
         :param spark: The Spark session.
         :param logger: The logger. If not provided, a default logger will be used.
@@ -20,23 +21,28 @@ class UpsertHandler:
         self.spark = spark
         self.logger = logger if logger else logging.getLogger(__name__)
         self.transform_manager = TransformationManager(self.spark, self.logger)
+        self.table_manager = DeltaTableManager(self.spark, self.logger)
 
         # Create a single instance of each strategy class
         self.strategy_map = {
-            'fact': UpsertFact(self.spark, self.logger, self.transform_manager),
-            'scd2': UpsertSCD2(self.spark, self.logger, self.transform_manager),
-            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager),
-            'generic': UpsertGeneric(self.spark, self.logger, self.transform_manager)
+            'fact': UpsertFact(self.spark, self.logger, self.transform_manager, self.table_manager),
+            'scd2': UpsertSCD2(self.spark, self.logger, self.transform_manager, self.table_manager),
+            'scd1': UpsertSCD1(self.spark, self.logger, self.transform_manager, self.table_manager),
+            'generic': UpsertGeneric(self.spark, self.logger, self.transform_manager, self.table_manager)
         }
 
-    def upsert_data_concurrently(self, table_configs: List[Dict], storage_container_endpoint: Optional[str] = None, write_method: str = 'path'):
+    def upsert_data_concurrently(
+        self, 
+        table_configs: List[Dict[str, str]], 
+        storage_container_endpoint: Optional[str] = None, 
+        write_method: str = 'catalog'
+    ) -> None:
         """
         Performs upsert operations concurrently on multiple tables based on the provided configurations.
 
         :param table_configs: A list of table configurations.
         :param storage_container_endpoint: The storage container endpoint (optional).
-        :param write_method: The write method (default is 'path').
-        :param delete_unmatched: Whether to delete unmatched records (default is False).
+        :param write_method: The write method (default is 'catalog'). Options are 'catalog' and 'path'.
 
         Example:
         table_configs = [

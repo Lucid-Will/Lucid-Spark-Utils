@@ -68,7 +68,7 @@ class UpsertSCD2(UpsertStrategy):
                 .withColumn("is_current", lit(True))
                 .withColumn("is_deleted", lit(False)))
     
-    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'path') -> None:
+    def upsert_to_table(self, config: Dict[str, Any], storage_container_endpoint: Optional[str] = None, write_method: str = 'catalog') -> None:
         """
         Performs an upsert operation (merge) on a Delta table based on the provided configuration.
         This function supports SCD2 and auditing with specified columns.
@@ -117,7 +117,14 @@ class UpsertSCD2(UpsertStrategy):
             # Generate keys using the unified transformation method
             if self.transformer:
                 # Stage the dataframe with keys
-                df_source = self.transformer.stage_dataframe_with_keys(storage_container_endpoint, table_name, df_source, primary_key_column, composite_key_column, composite_columns)
+                df_source = self.transformer.stage_dataframe_with_keys(
+                    storage_container_endpoint, 
+                    table_name, 
+                    df_source, 
+                    primary_key_column, 
+                    composite_key_column, 
+                    composite_columns
+                )
         except Exception as e:
             self.logger.error(f"Failed to generate keys for table {table_name}: {e}")
             raise
@@ -150,17 +157,14 @@ class UpsertSCD2(UpsertStrategy):
                 self.logger.info(f'Addition of audit columns for table {table_name} failed with error: {str(e)}')
                 raise
 
-            # Write the dataframe to the Delta table
+            # Write the dataframe to a Delta table
             try:
-                if write_method == 'path':
-                    # Check for storage container endpoint
-                    if not storage_container_endpoint:
-                        raise ValueError("Storage container endpoint must be provided when using 'path' write method.")
-                    df_source.write.format('delta').mode('overwrite').save(f'{storage_container_endpoint}/Tables/{table_name}')
-                elif write_method == 'catalog':
-                    df_source.write.format('delta').mode('overwrite').saveAsTable(table_name)
-                else:
-                    raise ValueError("Invalid write method provided. Use 'path' or 'catalog'.")
+                self.table_manager.write_delta_table(
+                    df_source, 
+                    table_name, 
+                    storage_container_endpoint, 
+                    write_method
+                )
             except Exception as e:
                 self.logger.info(f'Writing of initial load for table {table_name} failed with error: {str(e)}')
                 raise

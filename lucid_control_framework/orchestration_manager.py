@@ -1,8 +1,10 @@
 from lucid_control_framework.transformation_manager import TransformationManager
 from lucid_control_framework.upsert_strategy.upsert_handler import UpsertHandler
+from lucid_control_framework.delta_table_manager import DeltaTableManager
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
 from pyspark.sql.functions import col, current_timestamp
 from delta.tables import DeltaTable
+from typing import Optional
 import logging
 import json
 
@@ -24,14 +26,21 @@ class OrchestrationManager:
         self.logger = logger if logger else logging.getLogger(__name__)
         self.transform_manager = TransformationManager(self.spark, self.logger)
         self.upsert_manager = UpsertHandler(self.spark, self.logger)
+        self.table_manager = DeltaTableManager(self.spark, self.logger)
 
-    def load_orchestration_config(self, control_storage_container_endpoint: str, control_table_name: str, orchestration_config: list):
+    def load_orchestration_config(
+            self,
+            control_table_name: str,
+            orchestration_config: list,
+            write_method: str = 'catalog',
+            control_storage_container_endpoint: Optional[str] = None
+        ):
         """
         Load the orchestration configuration into a DataFrame and save it as a delta table.
         
-        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration configuration is stored.
         :param control_table_name: The name of the control table.
         :param orchestration_config: A list of dictionaries representing the orchestration configuration.
+        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration configuration is stored.
 
         Example = [
             {
@@ -59,18 +68,29 @@ class OrchestrationManager:
         ]
         """
         try:
-            # Set path to the orchestration config table
-            table_path = f"{control_storage_container_endpoint}/Tables/{control_table_name}"
-            
             # Attempt to access the Delta table
             try:
-                DeltaTable.forPath(self.spark, table_path)
+                if write_method == 'catalog':
+                    DeltaTable.forName(self.spark, control_table_name)
+                elif write_method == 'path':
+                    DeltaTable.forPath(self.spark, f'{control_storage_container_endpoint}/Tables/{control_table_name}')
+                else:
+                    raise ValueError(f'Invalid write method: {write_method}')
             except Exception as e:
                 self.logger.info('Table does not exist, creating it.')
 
-                # Create the table with the correct schema
+                # Construct log table path
+                if write_method == 'catalog':
+                    create_table = f'CREATE TABLE {control_table_name}'
+                elif write_method == 'path':
+                    control_table_path = f'{control_storage_container_endpoint}/Tables/{control_table_name}'
+                    create_table = f'CREATE TABLE delta.`{control_table_path}`'
+                else:
+                    raise ValueError(f'Invalid write method: {write_method}')
+                    
+                # Create logging table
                 self.spark.sql(f"""
-                    CREATE TABLE delta.`{table_path}` (
+                    {create_table} (
                         orchestration_config_key INT,
                         notebook_name VARCHAR(4000),
                         notebook_path VARCHAR(4000),
@@ -125,13 +145,20 @@ class OrchestrationManager:
             self.logger.error(f'Failed to create and load model config: {e}')
             raise e
 
-    def build_dag(self, control_storage_container_endpoint: str, control_table_name: str, process_group: int) -> dict:
+    def build_dag(
+            self,
+            control_table_name: str,
+            process_group: int,
+            write_method: str = 'catalog',
+            control_storage_container_endpoint: Optional[str] = None,
+        ) -> dict:
         """
         Build a Directed Acyclic Graph (DAG) for data processing based on the orchestration configuration.
         
-        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration configuration is stored.
         :param control_table_name: The name of the control table.
         :param process_group: The load group to use for building the DAG.
+        :param write_method: The method to use for writing the table. Can be either 'path' or 'catalog'.
+        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration configuration is stored.
         :return: A dictionary representing the DAG.
 
         Example:
@@ -139,11 +166,8 @@ class OrchestrationManager:
         dag = OrchestrationManager.build_dag(control_storage_container_endpoint, process_group)
         """
         try:
-            # Set the path to the orchestration config table
-            table_path = f'{control_storage_container_endpoint}/Tables/{control_table_name}'
-
             # Fetch the orchestration configurations from the control table
-            df_control = self.spark.load(table_path).filter(
+            df_control = self.table_manager.read_delta_table(control_table_name, control_storage_container_endpoint, write_method).filter(
                 (col('active') == 1) & (col('process_group') == process_group)
             )
             control_list = map(lambda row: row.asDict(), df_control.collect())
@@ -171,13 +195,20 @@ class OrchestrationManager:
             self.logger.error(f'Failed to build the DAG: {e}')
             raise
 
-    def log_orchestration_execution(self, control_storage_container_endpoint: str, log_table_name: str, execution_results: dict):
+    def log_orchestration_execution(
+            self,
+            log_table_name: str,
+            execution_results: dict,
+            write_method: str = 'catalog',
+            control_storage_container_endpoint: Optional[str] = None,
+        ):
         """
         Log the execution results into a DataFrame and save it as a delta table.
         
-        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration log is stored.
         :param log_table_name: The name of the control table.
         :param execution_results: A dictionary representing the execution results.
+        :param write_method: The method to use for writing the table. Can be either 'path' or 'catalog'.
+        :param control_storage_container_endpoint: The endpoint of the storage container where the orchestration log is stored.
 
         Example:
         log_orchestration_execution(control_storage_container_endpoint, log_table_name, execution_results)
@@ -214,35 +245,56 @@ class OrchestrationManager:
             # Create a DataFrame from the logs
             df = self.spark.createDataFrame(logs, schema)
 
-            # Set log table
-            log_table_name = 'orchestration_log'
-
-            # Set path to the log table
-            table_path = f'{control_storage_container_endpoint}/Tables/{log_table_name}'
-            
             # Check if the log table exists and create it if it doesn't
             try:
-                DeltaTable.forPath(self.spark, table_path)
+                if write_method == 'catalog':
+                    DeltaTable.forName(self.spark, log_table_name)
+                elif write_method == 'path':
+                    DeltaTable.forPath = f'{control_storage_container_endpoint}/Tables/{log_table_name}'
             except Exception as e:
                 self.logger.info('Table does not exist, creating it.')
 
+                # Construct log table path
+                if write_method == 'catalog':
+                    create_table = f'CREATE TABLE {log_table_name}'
+                elif write_method == 'path':
+                    log_table_path = f'{control_storage_container_endpoint}/Tables/{log_table_name}'
+                    create_table = f'CREATE TABLE delta.`{log_table_path}`'
+                else:
+                    raise ValueError(f'Invalid write method: {write_method}')
+
                 # Create logging table
-                self.spark.sql(f'''
-                    CREATE TABLE delta.`{table_path}` (
+                self.spark.sql(f"""
+                        {create_table} (
                         orchestration_log_key INT,
                         notebook_name VARCHAR(4000),
                         execution_status VARCHAR(4000),
                         exception VARCHAR(4000),
                         log_timestamp TIMESTAMP
                     ) USING delta
-                ''')
+                """)
                 self.logger.info(f'Log table {log_table_name} has been created.')
 
             # Add key to the log DataFrame using transform manager
-            df = self.transform_manager.stage_dataframe_with_keys(control_storage_container_endpoint, log_table_name, df, 'orchestration_log_key')
+            df = self.transform_manager.stage_dataframe_with_keys(
+                control_storage_container_endpoint, 
+                log_table_name, 
+                df, 
+                'orchestration_log_key',
+                composite_key_column = None,
+                match_key_columns = None,
+                read_method = write_method
+            )
             
             # Write the DataFrame to the delta layer
-            df.write.format('delta').mode('append').save(table_path)
+            self.transform_manager.write_delta_table(
+                df, 
+                log_table_name, 
+                control_storage_container_endpoint, 
+                write_method, 
+                'append', 
+                'true'
+            )
         except Exception as e:
             self.logger.error(f'Failed to save execution log: {e}')
             raise
