@@ -1,5 +1,5 @@
 """
-lucid_control_framework
+lucid_spark_utils
 -----------------------
 
 A Python library providing a consolidated toolset for data engineering and orchestration.
