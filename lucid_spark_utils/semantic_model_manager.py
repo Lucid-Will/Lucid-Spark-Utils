@@ -437,8 +437,8 @@ class SemanticModelManager:
                         end_time TIMESTAMP,
                         duration FLOAT,
                         status VARCHAR(50),
-                        error VARCHAR(4000),
-                        message VARCHAR(4000),
+                        error_code VARCHAR(4000),
+                        error_description VARCHAR(4000),
                         inserted_date_time TIMESTAMP,
                         updated_date_time TIMESTAMP
                     ) USING delta;
