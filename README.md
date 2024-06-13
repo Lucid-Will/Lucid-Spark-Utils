@@ -31,7 +31,7 @@ utils = lucid.LucidUtils()
 To install the package in-line in a notebook, you can use the `!pip install` command with the direct URL to the `.whl` file in the GitHub repository:
 
 ```python
-!pip install "https://raw.githubusercontent.com/Lucid-Will/lucid_spark_utils/main/lucid_spark_utils-1.0-py3-none-any.whl" 
+!pip install "https://raw.githubusercontent.com/Lucid-Will/Lucid-Spark-Utils/main/lucid_spark_utils-1.0-py3-none-any.whl" 
 ```
 Once installed, you can use the `import` command:
 
@@ -58,14 +58,14 @@ Detailed documentation for each module in the Lucid Spark Utils library can be f
 
 Here are the direct links to the documentation for each module:
 
-- [Data Validation Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/data_validation_manager.md)
-- [Delta Table Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/delta_table_manager.md)
-- [File Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/file_manager.md)
-- [Orchestration Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/orchestration_manager.md)
-- [Semantic Model Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/semantic_model_manager.md)
-- [Transformation Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/transformation_manager.md)
-- [Upsert Strategy](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/upsert_strategy.md)
-- [Utility Manager](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/docs/utility_manager.md)
+- [Data Validation Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/data_validation_manager.md)
+- [Delta Table Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/delta_table_manager.md)
+- [File Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/file_manager.md)
+- [Orchestration Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/orchestration_manager.md)
+- [Semantic Model Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/semantic_model_manager.md)
+- [Transformation Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/transformation_manager.md)
+- [Upsert Strategy](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/upsert_strategy.md)
+- [Utility Manager](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/docs/utility_manager.md)
 
 ## Contributions
 
@@ -73,4 +73,4 @@ Contributions to Lucid Spark Utils are very welcome! If you have a feature reque
 
 ## License
 
-Lucid Spark Utils is licensed under the terms of the CC BY-NC license. See the [LICENSE](https://github.com/Lucid-Will/lucid_spark_utils/blob/main/LICENSE) file for more details.
+Lucid Spark Utils is licensed under the terms of the CC BY-NC license. See the [LICENSE](https://github.com/Lucid-Will/Lucid-Spark-Utils/blob/main/LICENSE) file for more details.
