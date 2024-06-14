@@ -157,36 +157,22 @@ class FileManager:
                     if isinstance(field.dataType, TimestampType):
                         dataframe = dataframe.withColumn(field.name, dataframe[field.name].cast('string'))
                 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-                
                 # Convert spark dataframe to pandas dataframe and write to CSV
                 dataframe.toPandas().to_csv(f"{storage_container_endpoint}/Files/{file_name}.csv", index=False)
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
             elif file_format.lower() == 'json':
                 # Convert timestamp fields to string to avoid issues with writing to JSON
                 for field in dataframe.schema.fields:
                     if isinstance(field.dataType, TimestampType):
                         dataframe = dataframe.withColumn(field.name, dataframe[field.name].cast('string'))
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-                
                 # Convert spark dataframe to pandas dataframe and write to JSON
                 dataframe.toPandas().to_json(f"{storage_container_endpoint}/Files/{file_name}.json", orient='records', lines=True)
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
             elif file_format.lower() == 'parquet':
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-                
+                # Convert spark dataframe to pandas dataframe and write to parquet
                 dataframe.write.parquet(f"{storage_container_endpoint}/Files/{file_name}.parquet")
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
             else:
                 raise ValueError(f"Invalid file format: {file_format}")
         except Exception as e:
