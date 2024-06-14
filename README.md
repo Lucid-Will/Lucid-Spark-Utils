@@ -9,7 +9,7 @@ Lucid Spark Utils is an open-source Python package developed to streamline and e
 - **File Manager**: Streamlines file operations in Spark, making it easier to read, write, and manage files.
 - **Orchestration Manager**: Manages the orchestration of tasks in Spark using DAGs.
 - **Semantic Model Manager**: Manages semantic models activities such as semantic model refresh operations in Spark.
-- **Transformation Manager**: Simplifies the process of transforming data with in Spark, making it easier to apply key fields to DataFrames beofre loading to Delta tables.
+- **Transformation Manager**: Simplifies the process of transforming data with in Spark, making it easier to apply key fields to DataFrames before loading to Delta tables.
 - **Upsert Strategy**: Provides a strategy for upserting data in Spark, simplifying loading patterns using SCD and Fact tables loads.
 - **Utility Manager**: Provides a variety of utility functions for Spark, making it easier to perform common tasks and operations.
 
