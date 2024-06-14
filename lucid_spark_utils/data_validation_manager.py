@@ -271,16 +271,10 @@ class Validation:
                 for column in timestamp_columns:
                     invalid_records = invalid_records.withColumn(column, col(column).cast('string'))
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-
                 # Write invalid records to CSV
                 invalid_records_df = invalid_records.toPandas()
                 invalid_records_df.to_csv(invalid_records_path, index=False)
                 self.logger.info(f'Invalid records have been saved to {invalid_records_path}.')
-
-                # Re-enable Arrow for further processing
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 
             # Cache the valid records for efficient duplicate handling
             valid_records.cache()
@@ -306,16 +300,10 @@ class Validation:
                 for column in timestamp_columns:
                     duplicate_records = duplicate_records.withColumn(column, col(column).cast('string'))
 
-                # Temporarily disble Arrow for writing to CSV
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-                
                 # Write duplicate records to CSV
                 duplicate_records_df = duplicate_records.toPandas()
                 duplicate_records_df.to_csv(duplicate_records_path, index=False)
                 self.logger.info(f'Duplicate records have been saved to {duplicate_records_path}.')
-
-                # Re-enable Arrow for further processing
-                self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 
             # Filter out the duplicate records from the valid records
             final_valid_records = valid_records.join(df_duplicates, on=composite_columns, how='left_anti')
@@ -362,16 +350,11 @@ class Validation:
                     for column in timestamp_columns:
                         delete_records = delete_records.withColumn(column, col(column).cast('string'))
 
-                    # Temporarily disble Arrow for writing to CSV
-                    self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
-                    
                     # Write delete flagged records to CSV
                     df_delete_records = delete_records.toPandas()
                     df_delete_records.to_csv(delete_records_path, index=False)
                     self.logger.info(f'Records flagged for deletion have been saved to {delete_records_path}.')
-
-                    # Re-enable Arrow for further processing
-                    self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+                    
             except Exception as e:
                     self.logger.info(f"Target table {target_table_name} does not exist. Skipping delete flagged records handling.")
                     delete_records = None
