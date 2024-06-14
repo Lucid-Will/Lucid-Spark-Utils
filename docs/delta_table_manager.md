@@ -39,10 +39,12 @@ This class is used for managing Delta tables in Spark. It includes methods for r
     - **Example:**
         ```python
         table_name = 'my_table'
-        storage_container_endpoint = 'abfss://workspaceid@onelake.dfs.fabric.microsoft.com/lakehouseid'
+        workspace_id = 'my_workspace_id'
+        lakehouse_id = 'my_lakehouse_id'
+        storage_container_endpoint = f'abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/{lakehouse_id}'
         storage_container_endpoint = 'abfss://workspaceid.dfs.core.windows.net/data'
-        read_method = 'default'
-        df = delta_table_reader.read_delta_table(table_name, storage_container_endpoint, read_method)
+        read_method = 'path'
+        df = utils.read_delta_table(table_name, storage_container_endpoint, read_method)
         ```
 
 - `read_delta_tables_concurrently(self, table_names: List[str], storage_container_endpoint: Optional[str] = None, read_method: str = 'catalog') -> Dict[str, DataFrame]`
@@ -60,7 +62,7 @@ This class is used for managing Delta tables in Spark. It includes methods for r
         storage_container_endpoint = 'abfss://workspaceid@onelake.dfs.fabric.microsoft.com/lakehouseid'
         storage_container_endpoint = 'abfss://workspaceid.dfs.core.windows.net/data'
         read_method = 'path'
-        df_tables = delta_table_reader.read_delta_tables_concurrently(table_names, storage_container_endpoint, read_method)
+        df_tables = utils.read_delta_tables_concurrently(table_names, storage_container_endpoint, read_method)
         ```
 
 - `write_delta_table(self, dataframe: DataFrame, table_name: str, storage_container_endpoint: Optional[str] = None, write_method: str = 'catalog', write_mode: str = 'overwrite', merge_schema: str = 'true') -> None`
@@ -79,9 +81,9 @@ This class is used for managing Delta tables in Spark. It includes methods for r
         ```python
         dataframe = df_data
         table_name = 'my_table'
-        storage_container_endpoint = 'abfss://workspaceid.dfs.core.windows.net/data'
+        storage_container_endpoint = 'abfss://workspaceid@onelake.dfs.fabric.microsoft.com/lakehouseid'
         write_method = 'path'
         write_mode = 'overwrite'
         merge_schema = 'true'
-        delta_table_writer.write_delta_table(dataframe, table_name, storage_container_endpoint, write_method)
+        utils.write_delta_table(dataframe, table_name, storage_container_endpoint, write_method)
         ```

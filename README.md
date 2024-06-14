@@ -31,7 +31,7 @@ utils = lucid.LucidUtils()
 To install the package in-line in a notebook, you can use the `!pip install` command with the direct URL to the `.whl` file in the GitHub repository:
 
 ```python
-!pip install "https://raw.githubusercontent.com/Lucid-Will/Lucid-Spark-Utils/main/lucid_spark_utils-1.0-py3-none-any.whl" 
+!pip install "https://raw.githubusercontent.com/Lucid-Will/Lucid-Spark-Utils/main/dist/lucidsparkutils-1.0-py3-none-any.whl" --quiet 2>/dev/null
 ```
 Once installed, you can use the `import` command:
 

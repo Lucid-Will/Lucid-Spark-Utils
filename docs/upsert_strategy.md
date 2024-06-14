@@ -166,4 +166,43 @@ This class handles concurrent upsert operations on multiple tables.
         - `table_configs`: A list of dictionaries, each representing a table configuration.
         - `storage_container_endpoint`: The endpoint of the storage container if using 'path' write method.
         - `write_method`: The method to use for saving the table ('path' or 'catalog').
+    - **Example:**
+        ```python
+        from lucid_spark_utils import UpsertHandler
 
+        # Initialize the UpsertHandler
+        handler = UpsertHandler(spark)
+
+        # Set source and target tables
+        source_table = 'bronze.packagetypes'
+        target_table = 'gold.dim_package_type'
+
+        # Set target storage container endpoint
+        target_storage_container_endpoint = gold_storage_container_endpoint
+
+        # Set upsert match columns and surrogate key name
+        composite_columns = ['package_type_id']
+        primary_key_column = 'package_type_key'
+
+        # Build stage dataframe
+        df_stage = spark.sql(f"""
+            SELECT 
+                PackageTypeID       package_type_id
+                ,PackageTypeName    package_type_name
+            FROM {source_table}
+        """)
+
+        # Set upsert config
+        upsert_config = [
+            {
+                "table_name": target_table,
+                "dataframe": df_stage,
+                "composite_columns": composite_columns,
+                "upsert_type": "scd1",
+                "primary_key_column": primary_key_column
+            }
+        ]
+
+        # Perform upsert
+        handler.upsert_data_concurrently(upsert_config)
+        ```
