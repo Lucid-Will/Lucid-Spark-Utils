@@ -74,7 +74,7 @@
 # Install and initialize lucid-spark-utils
 get_ipython().system('pip install "https://raw.githubusercontent.com/Lucid-Will/Lucid-Spark-Utils/main/dist/lucidsparkutils-1.0-py3-none-any.whl" --quiet 2>/dev/null')
 
-import lucid_spark_utils as lucid
+import lucid_control_framework as lucid
 utils = lucid.LucidUtils()
 
 

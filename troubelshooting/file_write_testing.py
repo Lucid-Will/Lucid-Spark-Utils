@@ -14,7 +14,7 @@ get_ipython().system('pip install /lakehouse/default/Files/lucidsparkutils-1.0.1
 # In[ ]:
 
 
-import lucid_spark_utils as lucid
+import lucid_control_framework as lucid
 utils = lucid.LucidUtils()
 
 
