@@ -158,7 +158,8 @@ class UpsertSCD2(UpsertStrategy):
                 'dataframe': spark.createDataFrame([(1, "John", "Doe"), (2, "Jane", "Doe")], ["ID", "First Name", "Last Name"]),
                 'composite_columns': ['ID', 'First Name'],
                 'upsert_type': 'scd2',
-                'primary_key_column': 'primary_key'
+                'primary_key_column': 'primary_key',
+                'add_composite_key': True
             }
             write_method = 'path'
             storage_container_endpoint = None
@@ -170,14 +171,15 @@ class UpsertSCD2(UpsertStrategy):
             df_source = config['dataframe']
             composite_columns = config['composite_columns']
             primary_key_column = config.get('primary_key_column')
+            add_composite_key = config.get('add_composite_key', False)
 
             # Set composite_key_column to None by default
             composite_key_column = None
             
             # Assign composite_key_column if composite_columns provided
-            if composite_columns:
+            if composite_columns and add_composite_key == True:
                 # Set composite key column name
-                composite_key_column = primary_key_column.replace("key", "composite_key")
+                composite_key_column = primary_key_column.replace("_key", "_composite_key")
 
         except KeyError as e:
             raise ValueError(f"Configuration must include 'table_name', 'dataframe', 'composite_columns', and 'primary_key_column': {str(e)}'")
@@ -193,7 +195,8 @@ class UpsertSCD2(UpsertStrategy):
                     composite_key_column, 
                     composite_columns,
                     write_method,
-                    storage_container_endpoint   
+                    storage_container_endpoint,
+                    add_composite_key
                 )
         except Exception as e:
             self.logger.error(f"Failed to generate keys for table {table_name}: {e}")

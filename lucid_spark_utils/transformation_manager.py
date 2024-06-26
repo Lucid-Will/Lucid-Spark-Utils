@@ -23,7 +23,8 @@ class TransformationManager:
         composite_key_column: Optional[str] = None, 
         composite_columns: Optional[List[str]] = None, 
         read_method: str = 'catalog',
-        target_table_storage_container_endpoint: Optional[str] = None 
+        target_table_storage_container_endpoint: Optional[str] = None,
+        add_composite_key: bool = False
     ) -> Optional[DataFrame]:
         """
         Transforms a DataFrame by adding a new column with an integer hash based on specified key columns.
@@ -36,6 +37,7 @@ class TransformationManager:
         :param composite_columns: List of columns to use for hash generation.
         :param read_method: The method to use for reading the target table. Can be either 'path' or 'catalog'.
         :param target_table_storage_container_endpoint: The storage container endpoint for the target table. Required if read_method is 'path'.
+        :param add_composite_key: A boolean flag to indicate whether to add a composite key column to the DataFrame. Defaults to False.
 
         :return: Transformed DataFrame with the new columns added, if specified.
 
@@ -75,7 +77,7 @@ class TransformationManager:
             # Select the specified columns
             df_transformed = dataframe.select(*columns)
 
-            if composite_columns:
+            if composite_columns and add_composite_key == True:
                 # Generate an integer hash based on the composite_columns and add it as the new column
                 concat_cols = concat_ws('_', *[df_transformed[col] for col in composite_columns])
                 df_transformed = df_transformed.withColumn(composite_key_column, abs(hash(concat_cols))).select(composite_key_column, *columns)
