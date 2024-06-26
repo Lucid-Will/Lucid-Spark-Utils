@@ -41,7 +41,9 @@ class UpsertGeneric(UpsertStrategy):
                 'table_name': 'target_table',
                 'dataframe': spark.createDataFrame([(1, "John", "Doe"), (2, "Jane", "Doe")], ["ID", "First Name", "Last Name"]),
                 'composite_columns': ['ID', 'First Name'],
-                'primary_key_column': 'ID'
+                'upsert_type': 'generic',
+                'primary_key_column': 'ID',
+                'add_composite_key': True
             }
             write_method = 'catalog'
             storage_container_endpoint = None
@@ -65,6 +67,7 @@ class UpsertGeneric(UpsertStrategy):
             df_source = config['dataframe']
             composite_columns = config.get('composite_columns')
             primary_key_column = config.get('primary_key_column')
+            add_composite_key = config.get('add_composite_key', False)
         except KeyError as e:
             raise ValueError(f"Configuration must include 'table_name', 'dataframe', 'composite_columns', and 'primary_key_column': {str(e)}'")
         
@@ -73,9 +76,9 @@ class UpsertGeneric(UpsertStrategy):
             composite_key_column = None
             
             # Assign composite_key_column if composite_columns provided
-            if composite_columns:
+            if composite_columns and add_composite_key == True:
                 # Set composite key column name
-                composite_key_column = primary_key_column.replace("key", "composite_key")
+                composite_key_column = primary_key_column.replace("_key", "_composite_key")
 
                 # Determine if all data columns are part of the composite key
                 all_columns_are_composite_columns = set(composite_columns) == set(df_source.columns)
@@ -101,7 +104,8 @@ class UpsertGeneric(UpsertStrategy):
                     composite_key_column, 
                     composite_columns,
                     write_method,
-                    storage_container_endpoint
+                    storage_container_endpoint,
+                    add_composite_key
                 )
         except Exception as e:
             self.logger.error(f"Failed to generate keys for table {table_name}: {e}")
