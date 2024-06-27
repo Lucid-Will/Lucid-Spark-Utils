@@ -75,13 +75,13 @@ class UpsertGeneric(UpsertStrategy):
             # Set composite_key_column to None by default
             composite_key_column = None
             
-            # Assign composite_key_column if composite_columns provided
-            if composite_columns and add_composite_key == True:
-                # Set composite key column name
-                composite_key_column = primary_key_column.replace("_key", "_composite_key")
-
-                # Determine if all data columns are part of the composite key
+            # Determine if all data columns are part of the composite key
+            if composite_columns:
                 all_columns_are_composite_columns = set(composite_columns) == set(df_source.columns)
+
+            # Set composite key column name
+            if add_composite_key == True:
+                composite_key_column = primary_key_column.replace("_key", "_composite_key")
             
         except Exception as e:
             raise ValueError(f"Composite key column could not be generated: {str(e)}")
@@ -155,19 +155,21 @@ class UpsertGeneric(UpsertStrategy):
                 return
             
             elif not all_columns_are_composite_columns:            
-                # Create merge conditions
-                match_condition = ' AND '.join([f'target.{col} = source.{col}' for col in composite_columns])
-                
                 # Exclude key columns from change detection
                 key_columns = [primary_key_column, composite_key_column]
                 audit_columns = ['inserted_date_time', 'updated_date_time']
                 exclude_columns = composite_columns + key_columns + audit_columns
+                print('Exclude columns:', exclude_columns)
 
                 # Get columns for change detection
                 change_detection_columns = [col for col in df_source.columns if col not in exclude_columns]
+                print('Change detection columns:', change_detection_columns)
 
-                # Set update condition
+                # Create merge conditions
+                match_condition = ' AND '.join([f'target.{col} = source.{col}' for col in composite_columns])
                 update_condition = ' OR '.join([f'target.{col} != source.{col}' for col in change_detection_columns])
+                print('Match condition:', match_condition)
+                print('Update condition:', update_condition)
 
                 # Set record expiration expression
                 current_ts = current_timestamp()
