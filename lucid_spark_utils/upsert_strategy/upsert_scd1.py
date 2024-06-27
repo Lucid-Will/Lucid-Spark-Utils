@@ -238,16 +238,15 @@ class UpsertSCD1(UpsertStrategy):
 
                 # Set record expiration expression
                 current_ts = current_timestamp()
-                update_expr = {
-                    'updated_date_time': current_ts
-                }
+                update_expr = {col: f'source.{col}' for col in df_source.columns}
+                update_expr['updated_date_time'] = current_ts
                 
                 # Build merge operation
                 merge_operation = deltaTable.alias('target').merge(
                     source=df_source.alias('source'),
                     condition=match_condition
                 ).whenMatchedUpdate(
-                    condition=update_condition, 
+                    condition=update_condition,
                     set=update_expr
                 ).whenNotMatchedInsertAll()
 

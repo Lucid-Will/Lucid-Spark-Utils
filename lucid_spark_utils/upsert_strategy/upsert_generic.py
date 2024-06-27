@@ -123,7 +123,6 @@ class UpsertGeneric(UpsertStrategy):
         except Exception:
             self.logger.info(f'Table {table_name} not found. Creating table.')
 
-            deltaTable.show()
             # Write the dataframe to a Delta table
             try:
                 self.table_manager.write_delta_table(
@@ -160,31 +159,25 @@ class UpsertGeneric(UpsertStrategy):
                 key_columns = [primary_key_column, composite_key_column]
                 audit_columns = ['inserted_date_time', 'updated_date_time']
                 exclude_columns = composite_columns + key_columns + audit_columns
-                print('Exclude columns:', exclude_columns)
 
                 # Get columns for change detection
                 change_detection_columns = [col for col in df_source.columns if col not in exclude_columns]
-                print('Change detection columns:', change_detection_columns)
 
                 # Create merge conditions
                 match_condition = ' AND '.join([f'target.{col} = source.{col}' for col in composite_columns])
                 update_condition = ' OR '.join([f'target.{col} != source.{col}' for col in change_detection_columns])
-                print('Match condition:', match_condition)
-                print('Update condition:', update_condition)
 
                 # Set record expiration expression
                 current_ts = current_timestamp()
-                update_expr = {
-                    'updated_date_time': current_ts
-                }
+                update_expr = {col: f'source.{col}' for col in df_source.columns}
+                update_expr['updated_date_time'] = current_ts
                 
-                display(df_source)
                 # Build merge operation
                 merge_operation = deltaTable.alias('target').merge(
                     source=df_source.alias('source'),
                     condition=match_condition
                 ).whenMatchedUpdate(
-                    condition=update_condition, 
+                    condition=update_condition,
                     set=update_expr
                 ).whenNotMatchedInsertAll()
 
