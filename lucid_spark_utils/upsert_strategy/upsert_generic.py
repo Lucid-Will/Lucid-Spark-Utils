@@ -122,6 +122,7 @@ class UpsertGeneric(UpsertStrategy):
                 raise ValueError(f"Unsupported write method: {write_method}")
         except Exception:
             self.logger.info(f'Table {table_name} not found. Creating table.')
+            deltaTable.show()
 
             # Write the dataframe to a Delta table
             try:
@@ -176,7 +177,7 @@ class UpsertGeneric(UpsertStrategy):
                 update_expr = {
                     'updated_date_time': current_ts
                 }
-                
+                display(df)
                 # Build merge operation
                 merge_operation = deltaTable.alias('target').merge(
                     source=df_source.alias('source'),
@@ -185,6 +186,7 @@ class UpsertGeneric(UpsertStrategy):
                     condition=update_condition, 
                     set=update_expr
                 ).whenNotMatchedInsertAll()
+                print('Merge operation:', merge_operation)
 
             else:
                 # Create merge conditions
