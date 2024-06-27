@@ -139,16 +139,17 @@ class UpsertSCD1(UpsertStrategy):
             raise ValueError(f"Configuration must include 'table_name', 'dataframe', 'composite_columns', and 'primary_key_column': {str(e)}'")
         
         try:
-            # Determine if all data columns are part of the composite key
-            all_columns_are_composite_columns = set(composite_columns) == set(df_source.columns)
-            
             # Set composite_key_column to None by default
             composite_key_column = None
             
-            # Assign composite_key_column if composite_columns provided
-            if composite_columns and add_composite_key == True:
-                # Set composite key column name
+            # Determine if all data columns are part of the composite key
+            if composite_columns:
+                all_columns_are_composite_columns = set(composite_columns) == set(df_source.columns)
+
+            # Set composite key column name
+            if add_composite_key == True:
                 composite_key_column = primary_key_column.replace("_key", "_composite_key")
+            
         except Exception as e:
             raise ValueError(f"Composite key column could not be generated: {str(e)}")
         
