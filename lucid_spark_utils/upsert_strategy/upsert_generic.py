@@ -123,6 +123,7 @@ class UpsertGeneric(UpsertStrategy):
         except Exception:
             self.logger.info(f'Table {table_name} not found. Creating table.')
 
+            deltaTable.show()
             # Write the dataframe to a Delta table
             try:
                 self.table_manager.write_delta_table(
@@ -177,6 +178,7 @@ class UpsertGeneric(UpsertStrategy):
                     'updated_date_time': current_ts
                 }
                 
+                display(df_source)
                 # Build merge operation
                 merge_operation = deltaTable.alias('target').merge(
                     source=df_source.alias('source'),
